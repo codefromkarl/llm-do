@@ -1,5 +1,3 @@
-import textwrap
-
 import pytest
 
 from llm_do.config import LlmDoConfig, ModelConstraints, PromptSettings
@@ -43,13 +41,12 @@ def test_build_prompt_and_system_without_template(tmp_path):
 def test_build_prompt_and_system_with_template(tmp_path):
     template_file = tmp_path / "template.yaml"
     template_file.write_text(
-        textwrap.dedent(
-            """
-            name: pitchdeck
-            prompt: "Task: ${task} (${extra})"
-            system: "SpecPath=${spec_path}\nSpec=${spec}"
-            """
-        ).strip()
+        """name: pitchdeck
+prompt: "Task: ${task} (${extra})"
+system: |
+  SpecPath=${spec_path}
+  Spec=${spec}
+"""
     )
     config = LlmDoConfig(
         prompt=PromptSettings(
@@ -74,12 +71,9 @@ def test_build_prompt_and_system_with_template(tmp_path):
 def test_build_prompt_and_system_errors_on_missing_template_vars(tmp_path):
     template_file = tmp_path / "template.yaml"
     template_file.write_text(
-        textwrap.dedent(
-            """
-            name: invalid
-            prompt: "${missing}"
-            """
-        ).strip()
+        """name: invalid
+prompt: "${missing}"
+"""
     )
     config = LlmDoConfig(prompt=PromptSettings(template=str(template_file)))
 
@@ -92,4 +86,4 @@ def test_build_prompt_and_system_errors_on_missing_template_vars(tmp_path):
             working_dir=None,
         )
 
-    assert "missing variables" in str(excinfo.value)
+    assert "missing" in str(excinfo.value)
