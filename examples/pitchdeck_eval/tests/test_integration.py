@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from llm_do.executor import execute_spec
+from llm_do.context import WorkflowContext
 from examples.pitchdeck_eval.tools import PitchdeckToolbox
 
 
@@ -75,12 +76,15 @@ When user says "process pitchdecks":
         # Execute with mocked model
         with patch('llm.get_model', return_value=mock_model):
             with patch('llm.get_default_model', return_value='test-model'):
-                result = execute_spec(
-                    task="process pitchdecks",
+                context = WorkflowContext(
+                    pitchdeck_workspace,
                     spec_path=str(spec_file),
                     toolbox=pitchdeck_toolbox,
+                )
+                result = execute_spec(
+                    task="process pitchdecks",
+                    context=context,
                     verbose=False,
-                    working_dir=pitchdeck_workspace,
                 )
 
                 # Verify model.chain was called
@@ -153,12 +157,15 @@ When user says "process pitchdecks":
         # Execute workflow
         with patch('llm.get_model', return_value=mock_model):
             with patch('llm.get_default_model', return_value='test-model'):
-                result = execute_spec(
-                    task="process pitchdecks in pipeline/",
+                context = WorkflowContext(
+                    pitchdeck_workspace,
                     spec_path=str(spec_file),
                     toolbox=toolbox,
+                )
+                result = execute_spec(
+                    task="process pitchdecks in pipeline/",
+                    context=context,
                     verbose=False,
-                    working_dir=pitchdeck_workspace,
                 )
 
         # Verify workflow steps were executed
@@ -205,12 +212,15 @@ When user says "process pitchdecks":
         # Execute with tools_approve=True
         with patch('llm.get_model', return_value=mock_model):
             with patch('llm.get_default_model', return_value='test-model'):
-                result = execute_spec(
-                    task="test task",
+                context = WorkflowContext(
+                    pitchdeck_workspace,
                     spec_path=str(spec_file),
                     toolbox=toolbox,
+                )
+                result = execute_spec(
+                    task="test task",
+                    context=context,
                     verbose=False,
-                    working_dir=pitchdeck_workspace,
                     tools_approve=True,
                 )
 

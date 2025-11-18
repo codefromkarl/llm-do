@@ -24,11 +24,8 @@ def normalize_filename(filename: str) -> str:
 
     return name
 
-
 def test_normalize_filename():
-    """Run all tests"""
-    tests = [
-        # (input, expected_output)
+    cases = [
         ("Company.pdf", "Company"),
         ("Company Name.pdf", "CompanyName"),
         ("Company (YC S24).pdf", "CompanyYCS24"),
@@ -45,27 +42,5 @@ def test_normalize_filename():
         ("My Awesome Startup.pdf", "MyAwesomeStartup"),
     ]
 
-    passed = 0
-    failed = 0
-
-    for input_val, expected in tests:
-        result = normalize_filename(input_val)
-        if result == expected:
-            print(f"✅ '{input_val}' → '{result}'")
-            passed += 1
-        else:
-            print(f"❌ '{input_val}' → '{result}' (expected '{expected}')")
-            failed += 1
-
-    print()
-    print(f"Results: {passed} passed, {failed} failed")
-
-    if failed > 0:
-        return 1
-    else:
-        print("All tests passed! ✨")
-        return 0
-
-
-if __name__ == "__main__":
-    exit(test_normalize_filename())
+    for original, expected in cases:
+        assert normalize_filename(original) == expected

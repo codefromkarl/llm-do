@@ -47,7 +47,7 @@ where = ["."]
 include = ["llm_do*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "examples/pitchdeck_eval/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
