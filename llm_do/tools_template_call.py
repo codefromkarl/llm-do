@@ -39,6 +39,7 @@ class TemplateCall(llm.Toolbox):
         max_bytes: Optional[int] = None,
         ignore_functions: Optional[bool] = None,
         lock_template: Optional[str] = None,
+        default_model: Optional[str] = None,
     ):
         if config is not None and not isinstance(config, dict):
             raise TypeError("TemplateCall config must be a dict")
@@ -55,6 +56,8 @@ class TemplateCall(llm.Toolbox):
             options["ignore_functions"] = ignore_functions
         if lock_template is not None:
             options["lock_template"] = lock_template
+        if default_model is not None:
+            options["default_model"] = default_model
 
         self.allow_templates = options.get("allow_templates") or []
         suffixes = options.get("allowed_suffixes") or []
@@ -63,6 +66,7 @@ class TemplateCall(llm.Toolbox):
         self.max_bytes = int(options.get("max_bytes", 10_000_000))
         self.ignore_functions = bool(options.get("ignore_functions", True))
         self.lock_template = options.get("lock_template")
+        self.default_model = options.get("default_model")
         if self.max_attachments < 0:
             raise ValueError("max_attachments must be non-negative")
         if self.max_bytes <= 0:
@@ -108,7 +112,7 @@ class TemplateCall(llm.Toolbox):
 
         tool_instances = self._instantiate_tools(tmpl)
 
-        model_name = tmpl.model or llm.get_default_model()
+        model_name = tmpl.model or self.default_model or llm.get_default_model()
         model = llm.get_model(model_name)
 
         response = model.prompt(
