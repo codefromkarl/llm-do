@@ -170,3 +170,7 @@ This is an active experiment. The template format and toolbox APIs may change as
 ## Contributing
 
 PRs welcome for new templates, toolboxes, or workflow examples. If you're building something similar or have ideas for orchestration primitives, please open an issue.
+
+## Acknowledgements
+
+This plugin builds on [Simon Willison's llm library](https://llm.datasette.io/), which provides the foundation for model abstraction, template management, and tool integration. Without `llm`, this project would have required building all that infrastructure from scratch.
