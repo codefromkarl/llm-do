@@ -6,18 +6,22 @@ import fnmatch
 import inspect
 import json
 import textwrap
+from functools import lru_cache
 from importlib import resources
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 import llm
-from llm.cli import (
-    LoadTemplateError,
-    _parse_yaml_template,
-    _tools_from_code,
-    instantiate_from_spec,
-)
 from llm.templates import Template
+
+
+@lru_cache(maxsize=1)
+def _llm_cli_module():
+    """Import llm.cli lazily so plugin loading doesn't trigger circular imports."""
+
+    from llm import cli as cli_module
+
+    return cli_module
 
 
 class TemplateCall(llm.Toolbox):
@@ -126,6 +130,9 @@ class TemplateCall(llm.Toolbox):
         )
 
     def _load_template(self, name: str) -> Template:
+        cli = _llm_cli_module()
+        LoadTemplateError = cli.LoadTemplateError
+        parse_template = cli._parse_yaml_template
         if name.startswith("pkg:"):
             relative = name.split(":", 1)[1]
             package_root = resources.files("llm_do.templates")
@@ -133,14 +140,14 @@ class TemplateCall(llm.Toolbox):
             if not resource.is_file():
                 raise LoadTemplateError(f"Template not found in package: {relative}")
             content = resource.read_text(encoding="utf-8")
-            template = _parse_yaml_template(name, content)
+            template = parse_template(name, content)
             template._functions_is_trusted = True
             return template
         path = Path(name)
         if not path.exists():
             raise LoadTemplateError(f"Template not found: {name}")
         content = path.read_text(encoding="utf-8")
-        template = _parse_yaml_template(str(path), content)
+        template = parse_template(str(path), content)
         template._functions_is_trusted = True
         return template
 
@@ -164,6 +171,7 @@ class TemplateCall(llm.Toolbox):
         return attachments
 
     def _instantiate_tools(self, template: Template):
+        cli = _llm_cli_module()
         if not template.tools and (
             self.ignore_functions or not template.functions
         ):
@@ -180,7 +188,7 @@ class TemplateCall(llm.Toolbox):
             if not spec:
                 continue
             if spec[0].isupper():
-                tools.append(instantiate_from_spec(class_map, spec))
+                tools.append(cli.instantiate_from_spec(class_map, spec))
             else:
                 if spec not in registered:
                     raise ValueError(f"Unknown tool '{spec}' in template")
@@ -188,7 +196,7 @@ class TemplateCall(llm.Toolbox):
         if not self.ignore_functions and template.functions:
             if not template._functions_is_trusted:
                 raise ValueError("Template functions are not trusted")
-            tools.extend(_tools_from_code(textwrap.dedent(template.functions)))
+            tools.extend(cli._tools_from_code(textwrap.dedent(template.functions)))
         return tools
 
 
