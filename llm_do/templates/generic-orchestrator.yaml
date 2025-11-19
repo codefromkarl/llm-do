@@ -14,24 +14,10 @@ tools:
   - 'TemplateCall({"allow_templates": ["pkg:*", "templates/**/*.yaml", "./templates/**/*.yaml", "**/templates/**/*.yaml"], "allowed_suffixes": [".pdf", ".md", ".txt"], "max_attachments": 2, "max_bytes": 20000000})'
 functions: |
   import os
-  from textwrap import dedent
 
   def abs_path(relative: str) -> str:
       """Convert workspace-relative path to absolute path."""
       return os.path.abspath(relative)
-
-  def scaffold_template(task: str) -> str:
-      return dedent(
-          f"""
-          system: |
-            You solve exactly one unit of work extracted from: {task}
-            Respect any attached procedures/fragments.
-            Provide a clear, well-structured response.
-          prompt: |
-            Carry out the task for your specific unit. Keep context focused.
-            Provide your analysis and findings.
-          """
-      ).strip()
 prompt: |
   ## Task
   $input
@@ -51,10 +37,9 @@ prompt: |
      - If $sub_template is provided, use abs_path($sub_template) to get the
        absolute path.
      - If $sub_template is blank, create a new template file in
-       `templates/generated/` with a descriptive filename (e.g.,
-       `templates/generated/evaluate-pitch-decks.yaml`) using scaffold_template()
-       via Files_workspace_out_write_text, then use abs_path() to get its
-       absolute path.
+       `templates/generated/` with a descriptive filename. Write an appropriate
+       YAML template with system/prompt instructions tailored to the task, then
+       use abs_path() to get its absolute path.
      - Mention the template path you're using in your reasoning and final summary.
   4. For each unit (up to $max_units):
      - Gather attachment paths (PDF/Markdown/Text only) and any relevant
