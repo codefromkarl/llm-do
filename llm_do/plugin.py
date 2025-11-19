@@ -6,10 +6,12 @@ import llm
 
 from .tools_files import Files
 from .tools_template_call import TemplateCall
+from .tools_template_helpers import TemplateHelpers
 
 
 @llm.hookimpl
 def register_tools(register):
-    """Expose the Files and TemplateCall toolboxes to llm."""
+    """Expose the Files, TemplateCall, and TemplateHelpers toolboxes to llm."""
     register(Files)
     register(TemplateCall)
+    register(TemplateHelpers)

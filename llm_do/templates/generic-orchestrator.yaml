@@ -9,24 +9,14 @@ system: |
   - Files_workspace_ro_list() and Files_workspace_ro_read_text() for reading files
   - Files_workspace_out_write_text() for writing/creating files
   - TemplateCall_run() to execute sub-templates with tightly scoped context
-  - make_template(prompt_text) to generate a standard template with custom prompt
+  - TemplateHelpers_make_template(prompt_text) to generate a standard template
 
   Both Files toolboxes point to the current directory.
 tools:
   - 'Files({"mode": "ro", "path": ".", "alias": "workspace_ro"})'
   - 'Files({"mode": "out", "path": ".", "alias": "workspace_out"})'
   - 'TemplateCall({"allow_templates": ["pkg:*", "templates/**/*.yaml", "./templates/**/*.yaml", "**/templates/**/*.yaml"], "allowed_suffixes": [".pdf", ".md", ".txt"], "max_attachments": 2, "max_bytes": 20000000})'
-functions: |
-  def make_template(prompt_text: str) -> str:
-      """Create a standard template with user-provided prompt text."""
-      return f"""system: |
-  You solve exactly one unit of work.
-  Respect any attached procedures/fragments.
-  Provide a clear, well-structured response.
-
-prompt: |
-  {prompt_text}
-"""
+  - TemplateHelpers
 prompt: |
   ## Task
   $input
@@ -38,7 +28,7 @@ prompt: |
   ## Instructions
   1. Identify the units of work and discover them with Files_workspace_ro_list (limit to $max_units)
   2. If no sub_template provided, create a `.yaml` template in `templates/generated/`:
-     - Use make_template(prompt_text) to generate template content
+     - Use TemplateHelpers_make_template(prompt_text) to generate template content
      - Write it with Files_workspace_out_write_text
   3. For each unit: call TemplateCall_run with the template, attachments, and
      any relevant fragments, then write results using Files_workspace_out_write_text
