@@ -4,10 +4,13 @@ defaults:
   sub_template: ""
 system: |
   You turn free-form tasks into concrete multi-step workflows.
-  Use the provided Files toolboxes to inspect the workspace and write new files:
-  - Files_workspace_ro_* points at the current directory (read-only)
-  - Files_workspace_out_* points at the same directory but allows writes
-  Call TemplateCall_run to execute per-unit templates with tightly scoped context.
+
+  Available tools:
+  - Files_workspace_ro_list() and Files_workspace_ro_read_text() for reading files
+  - Files_workspace_out_write_text() for writing/creating files
+  - TemplateCall_run() to execute sub-templates with tightly scoped context
+
+  Both Files toolboxes point to the current directory.
 tools:
   - 'Files({"mode": "ro", "path": ".", "alias": "workspace_ro"})'
   - 'Files({"mode": "out", "path": ".", "alias": "workspace_out"})'
@@ -21,10 +24,9 @@ prompt: |
   Max units: $max_units
 
   ## Instructions
-  1. Identify the units of work (files, records, etc.) and where they live
-  2. Discover units using Files_workspace_ro_list (limit to $max_units)
-  3. If no sub_template provided, create one in `templates/generated/` with
-     appropriate system/prompt instructions for the task
-  4. For each unit: call TemplateCall_run with the template, attachments, and
-     any relevant fragments, then write the result to the output location
-  5. Report units processed, output location, and template path for reuse
+  1. Identify the units of work and discover them with Files_workspace_ro_list (limit to $max_units)
+  2. If no sub_template provided, create one with Files_workspace_out_write_text in
+     `templates/generated/` with appropriate system/prompt instructions
+  3. For each unit: call TemplateCall_run with the template, attachments, and
+     any relevant fragments, then write results using Files_workspace_out_write_text
+  4. Report units processed, output location, and template path for reuse
