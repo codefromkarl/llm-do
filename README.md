@@ -1,104 +1,60 @@
 # llm-do
 
-**A plan for template-driven agentic workflows for the `llm` CLI**
+A plugin for [llm](https://llm.datasette.io) that adds orchestration tools for building multi-step LLM workflows.
 
-## Vision
+## Background
 
-Build a **template-first plugin** for [llm](https://llm.datasette.io) that lets
-users orchestrate complex workflows using nothing more than `llm -t <template>
-"task"`. Instead of shipping a bespoke CLI, we'll contribute reusable toolboxes
-and ready-to-run templates that demonstrate a "progressive hardening" approach.
+This project started as a collection of prompts I ran in Claude Code to automate repetitive tasks—evaluating pitch decks, processing batches of documents, that sort of thing. It worked, but I quickly hit two limitations:
 
-## Core Philosophy
+1. **Control over LLM execution.** I needed finer control over how the LLM was invoked—which model, what attachments, structured outputs, guardrails around file access.
 
-1. **Templates as executable specs**
-   - Everything starts as an `llm` template (`.yaml`) capturing prompts,
-     schemas, allowed tools, and guardrails
-   - Templates remain the primary interface
+2. **IDE dependency.** Tying useful automation to a particular IDE felt wrong. I wanted something portable that could run in CI, on a server, or from any terminal.
 
-2. **Domain logic migrates from prompts to Python**
-   - Keep workflow rules in templates during exploration
-   - Move fragile pieces (parsing, validation, formatting) into tested Python
-     toolboxes as patterns stabilize
+After several false starts trying to build a standalone tool, I realized Simon Willison's [llm](https://llm.datasette.io) library already solved most of the hard parts: model abstraction, template management, tool integration. So I pivoted to building a plugin that extends `llm` with orchestration primitives.
 
-3. **Context reduction via sub-calls**
-   - Large workflows decompose into focused sub-LLM calls with tightly scoped
-     inputs
-   - Example: "evaluate exactly this PDF with this procedure" keeps each call
-     grounded
+## Design Approach: Evolving Hybrid Systems
 
-## Planned Structure
+The plugin is designed around a specific workflow for developing hybrid LLM/deterministic systems:
 
-This will be a clean break—**no backwards compatibility** with any previous `llm
-do` command. Target package layout:
+1. **Start with templates as executable specs**
+   - Begin with `llm` templates (`.yaml` files) that capture prompts, schemas, allowed tools, and guardrails
+   - Templates are the primary interface—keep everything flexible and easy to iterate
 
-```
-llm_do/
-  __init__.py
-  plugin.py                   # registers toolboxes with llm
-  tools_files.py              # sandboxed filesystem operations
-  tools_template_call.py      # sub-call orchestration
-  templates/
-    generic-orchestrator.yaml # domain-agnostic bootstrapper
-    pitchdeck-single.yaml     # reference sub-template
-examples/
-  pitchdeck_eval/             # end-to-end demo
-    PROCEDURE.md
-    pipeline/
-    evaluations/
-    templates/
-```
+2. **Migrate domain logic from prompts to Python**
+   - During exploration, keep workflow rules in templates where they're easy to modify
+   - As patterns stabilize and fragility emerges (parsing, validation, formatting, scoring math), move those pieces into tested Python toolboxes
+   - This progression lets you start fast and harden incrementally
 
-## Intended Usage
+3. **Reduce context via decomposed sub-calls**
+   - Large workflows with bloated prompts tend to drift and fail unpredictably
+   - Instead, decompose into focused sub-LLM calls with tightly scoped inputs
+   - Example: "evaluate exactly this PDF with this procedure" keeps each call grounded and reproducible
 
-Users will run templates directly:
+This approach treats template-based workflows as a starting point, not an end state. You prototype quickly with flexible templates, identify what's brittle, and gradually extract that logic into version-controlled, testable Python. Over time you end up with hybrid systems that balance LLM flexibility with deterministic reliability.
 
-```bash
-llm -t llm_do/templates/generic-orchestrator.yaml "task description"
-```
+## What It Does
 
-Template parameters pass through with `-p` as usual.
+`llm-do` adds two main toolboxes to `llm` templates:
 
----
+### Files
 
-## Installation Plan
-
-Once published:
-
-```bash
-llm install llm-do
-```
-
-Dependencies will be minimal: `llm>=0.26` and `PyYAML`. Users will install model
-providers separately via `llm install ...` and configure API keys as usual.
-
----
-
-## Toolboxes to Build
-
-### `Files` Toolbox
-
-Will provide sandboxed filesystem operations. Planned interface:
+Sandboxed file operations for templates. You specify a directory prefix and access mode:
 
 ```python
-Files("ro:pipeline")      # read-only sandbox at ./pipeline
-Files("out:evaluations")  # writable output sandbox
+Files("ro:pipeline")      # read-only access to ./pipeline
+Files("out:evaluations")  # writable access to ./evaluations
 ```
 
-**Methods to implement:**
-- `Files_list(pattern="**/*")` — glob within sandbox
+Methods:
+- `Files_list(pattern="**/*")` — glob within the sandbox
 - `Files_read_text(path, max_chars=200_000)` — read with size limits
-- `Files_write_text(path, content)` — write (denied in `ro:` mode)
+- `Files_write_text(path, content)` — write (blocked in `ro:` mode)
 
-**Design requirements:**
-- All paths resolved inside sandbox root
-- Path escape attempts raise errors immediately
-- `out:` sandboxes auto-create on first write
-- `ro:` sandboxes must exist before instantiation
+All paths are resolved inside the sandbox root. Attempts to escape (via `..` or absolute paths) raise errors immediately.
 
-### `TemplateCall` Toolbox
+### TemplateCall
 
-Will orchestrate sub-LLM calls with tight guardrails. Example configuration:
+Lets one template invoke another with controlled inputs. Example configuration:
 
 ```python
 TemplateCall(
@@ -110,95 +66,55 @@ TemplateCall(
 )
 ```
 
-**Primary method:**
-- `run(template, input="", attachments=None, fragments=None, params=None,
-  expect_json=False)`
+The `run` method mirrors how you'd use `llm -t <template>` from the command line:
 
-**Implementation requirements:**
-- Validate attachments (count, size, suffix) before passing to `llm`
-- Support filesystem templates and package templates via `pkg:` prefix
-- Ignore inline Python functions by default (security); add opt-in override
-- When `expect_json=True`, parse and normalize JSON responses
-
-#### Why TemplateCall (short version)
-
-TemplateCall formalizes the two-step "choose files → process files" pattern.
-Your outer template (or Python tool) can list candidates, pick what to work on,
-then hand each unit to a locked, allowlisted sub-template with vetted
-attachments/fragments and optional JSON schemas. This keeps context tight,
-enforces guardrails (suffix/size caps, attachment limits, template locks), and
-makes orchestration reproducible. Because TemplateCall lets templates call
-other templates, it introduces recursion—the template language becomes closed
-under its own execution model—which is the theoretical backbone for treating
-"choose → then act" as a first-class operation rather than an ad-hoc hack. See
-[`docs/templatecall-motivation.md`](docs/templatecall-motivation.md) for a deeper
-dive, including a runnable pitchdeck example recipe.
-
----
-
-## Templates to Ship
-
-### `generic-orchestrator.yaml`
-
-A domain-agnostic bootstrapper that will:
-
-1. Accept natural-language task + optional `sub_template` parameter
-2. Infer the unit of work ("each PDF in pipeline/", "each Markdown in notes/")
-   by inspecting directories with `Files`
-3. Generate a dedicated sub-template if needed, save to
-   `templates/generated/<slug>.yaml`
-4. Execute sub-template for each unit via `TemplateCall` with attachments +
-   procedure fragments
-5. Write outputs (typically Markdown) back via `Files`
-
-**Target invocation:**
-
-```bash
-llm -t llm_do/templates/generic-orchestrator.yaml \
-  -p max_units=5 \
-  "evaluate every PDF in pipeline/ and write summaries to evaluations/"
+```python
+run(
+  template,
+  input="",
+  attachments=[],
+  fragments=[],
+  params={},
+  expect_json=False,
+)
 ```
 
-Should report which sub-template was used/created and unit count.
+This enforces allowlists, file size/type restrictions, and attachment limits. It also supports template locking (force all calls to use a specific vetted template) and structured outputs via `expect_json=True`.
 
-### `pitchdeck-single.yaml`
+## Why TemplateCall?
 
-Reference sub-template for evaluating one pitch deck. Will expect:
+The simplest case where you need a second LLM call is the two-step pattern: **choose what to do**, then **do it**. For example:
 
-- Single PDF attachment
-- Optional procedure fragments
-- JSON output schema: `deck_id`, `file_slug`, `summary`, `scores`, `verdict`,
-  `red_flags`
+1. Look at a directory of PDFs and decide which ones need evaluation
+2. For each chosen PDF, run a separate LLM call with that file attached and a detailed rubric
 
-Primarily invoked by orchestrators but runnable standalone for experimentation.
+You could hard-code this in Python, but that makes iteration slow. A better approach is to keep the workflow logic in templates (easy to tweak) while adding a primitive that lets templates call other templates safely.
 
----
+That's what TemplateCall does. It makes the template language recursively closed—a template can invoke another template (or even itself indirectly) with the same guardrails. This turns common orchestration patterns into reusable building blocks instead of one-off scripts. Programmers tend to like clean recursion, and it makes workflows easier to audit and reproduce.
+
+See [`docs/templatecall.md`](docs/templatecall.md) for more detail on the design.
 
 ## Example: Pitch Deck Evaluation
 
-Will demonstrate the "one sub-call per file" pattern. Planned directory layout:
+The `examples/pitchdeck_eval` directory demonstrates the two-step pattern. Directory structure:
 
 ```
 examples/pitchdeck_eval/
-  PROCEDURE.md                 # evaluation rubric shared with every call
-  pipeline/                    # users drop PDF pitch decks here
-  evaluations/                 # Markdown outputs land here
+  PROCEDURE.md                 # shared evaluation rubric
+  pipeline/                    # drop PDFs here
+  evaluations/                 # Markdown outputs written here
   templates/
-    pitchdeck-single.yaml      # copy of single-call template
     pitchdeck-orchestrator.yaml
+    pitchdeck-single.yaml
 ```
 
-**How `pitchdeck-orchestrator.yaml` will work:**
+The orchestrator template:
+1. Lists PDFs in `pipeline/` using `Files("ro:pipeline")`
+2. Decides which files to process (could be all of them, or just a subset based on task description)
+3. For each file, calls `pitchdeck-single.yaml` via `TemplateCall_run`, passing the PDF as an attachment and `PROCEDURE.md` as a fragment
+4. Writes the resulting Markdown evaluations to `evaluations/` using `Files("out:evaluations")`
 
-1. Use `Files("ro:pipeline")` to list incoming PDFs
-2. Call `TemplateCall_run` once per file, locked to `pkg:pitchdeck-single.yaml`
-3. Convert returned JSON to Markdown via inline helper functions
-4. Save results with `Files("out:evaluations")`
-
-**Key benefit:** Each PDF processed in isolation keeps context tight and makes
-guardrails straightforward (file size limits, suffix restrictions, unit caps).
-
-**Target invocation:**
+Run it like this:
 
 ```bash
 cd examples/pitchdeck_eval
@@ -206,59 +122,51 @@ llm -t templates/pitchdeck-orchestrator.yaml \
   "evaluate every pitch deck in pipeline/ using the procedure"
 ```
 
-Users would populate `pipeline/` with PDFs; template reports which files were
-processed and output locations.
+Each PDF gets processed in its own isolated LLM call, which keeps context tight and makes guardrails straightforward (file size limits, attachment restrictions, etc.).
 
----
+## Progressive Hardening
 
-## Progressive Hardening Workflow
+The idea is to start with flexible templates and gradually move critical logic into Python as patterns stabilize:
 
-The intended user journey:
+1. **Exploration:** Use the generic orchestrator to infer templates and scaffold workflows
+2. **Specialization:** Copy the generated template, refine prompts, add schema constraints
+3. **Locking:** Pin the orchestrator to a specific vetted sub-template via `lock_template`
+4. **Hardening:** When brittle logic emerges (scoring math, slug generation, markdown formatting), migrate it from inline template functions to tested Python toolboxes
 
-1. **Exploration phase**
-   - Run `generic-orchestrator` without `sub_template` parameter
-   - Let it infer the per-unit template and generate a scaffold
+This keeps iteration fast while ensuring production workflows have solid foundations.
 
-2. **Specialization phase**
-   - Copy generated template to a named file (e.g.,
-     `templates/pitchdeck-single.yaml`)
-   - Refine system prompt, add schema fields, tighten instructions
+## Package Structure
 
-3. **Locking phase**
-   - Update orchestrator to use vetted template via `-p
-     sub_template=templates/pitchdeck-single.yaml`
-   - Or set `lock_template` in TemplateCall configuration
+```
+llm_do/
+  __init__.py
+  plugin.py                   # registers toolboxes with llm
+  tools_files.py              # Files toolbox implementation
+  tools_template_call.py      # TemplateCall toolbox implementation
+  templates/
+    generic-orchestrator.yaml # domain-agnostic orchestrator
+examples/
+  pitchdeck_eval/             # working pitch deck evaluation demo
+```
 
-4. **Hardening phase**
-   - When logic feels brittle (slug generation, markdown rendering, scoring
-     math), migrate from template `functions:` to Python helpers
-   - Expose helpers via custom toolboxes for reuse across templates
+This is a clean break from any prior `llm do` experiments—no backwards compatibility.
 
-Over time, templates stay expressive but critical behaviors move into
-version-controlled Python code.
+## Installation
 
----
+Not yet published to PyPI. For now, install in development mode:
 
-## Implementation Plan
+```bash
+pip install -e .
+```
 
-**Initial milestone:**
+Dependencies are minimal: `llm>=0.26` and `PyYAML`. You'll install model providers separately via `llm install ...` and configure API keys as usual.
 
-- [ ] Core `Files` toolbox with sandbox enforcement
-- [ ] Core `TemplateCall` toolbox with attachment validation
-- [ ] `generic-orchestrator.yaml` template
-- [ ] `pitchdeck-single.yaml` reference template
-- [ ] Pitch deck evaluation example
-- [ ] Basic test coverage (`pytest`)
-- [ ] Plugin registration with `llm`
+## Current Status
 
-**Future enhancements:**
+The core toolboxes and pitch deck example are implemented and working. The generic orchestrator is in progress. Test coverage is basic but growing.
 
-- Additional domain templates
-- More toolboxes for common patterns
-- Progressive hardening documentation and guides
+This is an active experiment. The template format and toolbox APIs may change as usage patterns emerge.
 
-**Development notes:**
+## Contributing
 
-- Templates will live under `llm_do/templates/` and `examples/*/templates/`
-- Keep prompts in YAML; move to Python only when fragility demands it
-- PRs welcome for new templates, toolboxes, or workflow documentation
+PRs welcome for new templates, toolboxes, or workflow examples. If you're building something similar or have ideas for orchestration primitives, please open an issue.

@@ -9,7 +9,7 @@ tools:
   - Files("ro:pipeline")
   - Files("out:evaluations")
   - TemplateCall({
-      "lock_template": "pkg:pitchdeck-single.yaml",
+      "lock_template": "templates/pitchdeck-single.yaml",
       "allow_templates": ["pkg:*", "./templates/**/*.yaml"],
       "allowed_suffixes": [".pdf"],
       "max_attachments": 1,
