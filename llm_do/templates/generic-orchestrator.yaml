@@ -2,7 +2,6 @@ model: claude-haiku-4.5
 defaults:
   max_units: 10
   sub_template: ""
-  child_model: claude-haiku-4.5
 system: |
   You turn free-form tasks into concrete multi-step workflows.
   Use the provided Files toolboxes to inspect the workspace and write new files:
@@ -12,14 +11,12 @@ system: |
 tools:
   - 'Files({"mode": "ro", "path": ".", "alias": "workspace_ro"})'
   - 'Files({"mode": "out", "path": ".", "alias": "workspace_out"})'
-  - 'TemplateCall({"allow_templates": ["pkg:*", "templates/**/*.yaml", "./templates/**/*.yaml", "**/templates/**/*.yaml"], "allowed_suffixes": [".pdf", ".md", ".txt"], "max_attachments": 2, "max_bytes": 20000000, "default_model": "$child_model"})'
+  - 'TemplateCall({"allow_templates": ["pkg:*", "templates/**/*.yaml", "./templates/**/*.yaml", "**/templates/**/*.yaml"], "allowed_suffixes": [".pdf", ".md", ".txt"], "max_attachments": 2, "max_bytes": 20000000})'
 functions: |
   import json
   import os
   import re
   from textwrap import dedent
-
-  CHILD_MODEL = "$child_model"
 
   def make_slug(text: str) -> str:
       slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
@@ -32,35 +29,23 @@ functions: |
   def scaffold_template(task: str) -> str:
       return dedent(
           f"""
-          model: {CHILD_MODEL}
           system: |
             You solve exactly one unit of work extracted from: {task}
             Respect any attached procedures/fragments.
-            Only return the JSON schema output.
+            Provide a clear, well-structured response.
           prompt: |
-            Carry out the task for your specific unit. Keep context tiny.
-            Output JSON only.
-          schema_object:
-            type: object
-            required: [unit_id, summary]
-            properties:
-              unit_id:
-                type: string
-              summary:
-                type: string
+            Carry out the task for your specific unit. Keep context focused.
+            Provide your analysis and findings.
           """
       ).strip()
 
-  def render_markdown(payload: dict) -> str:
+  def render_markdown(result: str, unit_name: str = "unit") -> str:
+      """Wrap a free-text result in simple markdown."""
       return "\n".join(
           [
-              f"# {payload.get('unit_id', 'unit')}",
+              f"# {unit_name}",
               "",
-              payload.get("summary", ""),
-              "",
-              "```json",
-              json.dumps(payload, indent=2),
-              "```",
+              result,
           ]
       )
 prompt: |
@@ -70,7 +55,6 @@ prompt: |
   ## Parameters
   Sub-template path (blank = generate): "$sub_template"
   Max units: $max_units
-  Child model: $child_model
 
   ## Instructions
   1. Parse the task to decide:
@@ -90,9 +74,9 @@ prompt: |
      - Gather attachment paths (PDF/Markdown/Text only) and any relevant
        instructions/spec fragments you discovered earlier.
      - Call TemplateCall_run with `template` set to the absolute template path
-       from step 3, plus the attachments, fragments, and expect_json=true so the
-       response is JSON.
-     - Convert the JSON to Markdown using render_markdown() and write it to the
-       chosen output directory via Files_workspace_out_write_text.
+       from step 3, plus the attachments and fragments. The response will be
+       plain text.
+     - Wrap the result using render_markdown(result, unit_name) and write it to
+       the chosen output directory via Files_workspace_out_write_text.
   5. Finish by reporting how many units were processed, where outputs went, and
      which template should be reused next time (e.g. via `-p sub_template=...`).

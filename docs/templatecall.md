@@ -18,7 +18,8 @@ You could write Python code to orchestrate these steps, but that's slow to itera
 - **Template allowlisting:** Only approved templates can be called (via glob patterns or specific locks)
 - **Attachment validation:** File count, size, and suffix restrictions enforced before passing to the LLM
 - **Fragment support:** Pass text snippets (procedures, rubrics, extracted sections) as additional context
-- **Structured outputs:** Optional JSON parsing and normalization via `expect_json=True`
+- **Structured outputs:** Optional JSON parsing and normalization via `expect_json=True` (only when the template defines `schema_object`).
+- **Automatic model inheritance:** If the child template omits its own `model`, TemplateCall reuses the model currently running the parent template/tool call.
 - **Security defaults:** Inline Python functions disabled by default (opt-in override available)
 
 Example configuration:
@@ -151,7 +152,8 @@ The `TemplateCall` toolbox is implemented in `llm_do/tools_template_call.py`. Ke
 
 - Template paths support `pkg:` prefix for package-bundled templates and filesystem paths for user templates
 - Attachment validation happens before invoking `llm` (fail fast if files are too large or have wrong extensions)
-- `expect_json=True` attempts to parse the response as JSON and returns a normalized structure
+- `expect_json=True` attempts to parse the response as JSON (only allowed when the template defines `schema_object`) and returns a normalized structure
+- If the child template does not declare a `model`, TemplateCall automatically inherits the parent template's model for the sub-call.
 - Inline Python functions in sub-templates are ignored by default (security); override via `allow_functions=True` if needed
 - Fragment files are read and passed as text to the template (useful for procedures, rubrics, or context snippets)
 

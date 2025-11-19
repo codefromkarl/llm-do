@@ -59,7 +59,7 @@ Lets one template invoke another with controlled inputs. Example configuration:
 ```python
 TemplateCall(
   allow_templates=["pkg:*", "./templates/**/*.yaml"],
-  lock_template="pkg:pitchdeck-single.yaml",
+  lock_template="templates/pitchdeck-single.yaml",
   allowed_suffixes=[".pdf", ".txt"],
   max_attachments=1,
   max_bytes=15_000_000,
@@ -79,7 +79,7 @@ run(
 )
 ```
 
-This enforces allowlists, file size/type restrictions, and attachment limits. It also supports template locking (force all calls to use a specific vetted template) and structured outputs via `expect_json=True`.
+This enforces allowlists, file size/type restrictions, and attachment limits. It also supports template locking (force all calls to use a specific vetted template) and structured outputs via `expect_json=True`. Only set `expect_json=True` if the target template defines `schema_object`; otherwise TemplateCall will error. When the child template omits its own `model`, TemplateCall automatically inherits the caller's model so sub-calls use the same provider/config by default.
 
 ## Why TemplateCall?
 

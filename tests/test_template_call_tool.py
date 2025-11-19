@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pytest
 
 from llm_do.tools_template_call import TemplateCall
@@ -53,3 +54,180 @@ def test_lock_template_overrides_argument(dummy_model, sample_template, tmp_path
     )
     tool.run(template="ignored", expect_json=True)
     assert dummy_model.calls
+
+
+def test_expect_json_without_schema_raises(template_without_schema):
+    tool = TemplateCall(allow_templates=[str(template_without_schema)])
+    with pytest.raises(ValueError):
+        tool.run(template=str(template_without_schema), expect_json=True)
+
+
+def test_template_call_infers_parent_model(
+    monkeypatch, template_without_model, sample_attachment
+):
+    captured = {}
+
+    class CaptureModel:
+        def __init__(self):
+            self.calls = []
+
+        def prompt(self, prompt_text: str, **kwargs):
+            self.calls.append((prompt_text, kwargs))
+            class _Dummy:
+                def text(self):
+                    return "{}"
+
+            return _Dummy()
+
+    model_instance = CaptureModel()
+
+    def fake_get_model(name):
+        captured["model_name"] = name
+        return model_instance
+
+    monkeypatch.setattr("llm.get_model", fake_get_model)
+    monkeypatch.setattr("llm.get_default_model", lambda: "default-model")
+    monkeypatch.setattr(
+        "llm_do.tools_template_call._current_chain_model_id",
+        lambda: "parent-model",
+    )
+
+    tool = TemplateCall(
+        allow_templates=[str(template_without_model)],
+        allowed_suffixes=[".txt"],
+        max_attachments=1,
+    )
+    tool.run(
+        template=str(template_without_model),
+        attachments=[str(sample_attachment)],
+    )
+    assert captured["model_name"] == "parent-model"
+
+
+def test_debug_mode_via_env_variable(
+    monkeypatch, dummy_model, sample_template, sample_attachment, capsys
+):
+    """Test that LLM_DO_DEBUG environment variable enables debug output."""
+    # Set environment variable
+    monkeypatch.setenv("LLM_DO_DEBUG", "1")
+
+    tool = TemplateCall(
+        allow_templates=[str(sample_template)],
+        allowed_suffixes=[".txt"],
+        max_attachments=1,
+    )
+
+    result = tool.run(
+        template=str(sample_template),
+        input="test input",
+        attachments=[str(sample_attachment)],
+        fragments=["procedure.md"],
+        expect_json=True,
+    )
+
+    # Check that the call succeeded
+    assert json.loads(result) == {"message": "ok"}
+
+    # Capture stderr output
+    captured = capsys.readouterr()
+
+    # Check that debug output was written to stderr
+    assert "[TemplateCall] Calling:" in captured.err
+    assert str(sample_template) in captured.err
+    assert "[TemplateCall] Model: dummy" in captured.err
+    assert "[TemplateCall] Attachments:" in captured.err
+    assert str(sample_attachment) in captured.err
+    assert "[TemplateCall] Fragments:" in captured.err
+    assert "procedure.md" in captured.err
+    assert "[TemplateCall] Prompt preview:" in captured.err
+    assert "[TemplateCall] Response:" in captured.err
+
+
+def test_debug_mode_explicit_config(
+    dummy_model, sample_template, sample_attachment, capsys
+):
+    """Test that debug mode can be enabled via explicit config."""
+    tool = TemplateCall(
+        allow_templates=[str(sample_template)],
+        allowed_suffixes=[".txt"],
+        max_attachments=1,
+        debug=True,
+    )
+
+    result = tool.run(
+        template=str(sample_template),
+        input="test input",
+        attachments=[str(sample_attachment)],
+        expect_json=True,
+    )
+
+    # Check that the call succeeded
+    assert json.loads(result) == {"message": "ok"}
+
+    # Capture stderr output
+    captured = capsys.readouterr()
+
+    # Check that debug output was written
+    assert "[TemplateCall] Calling:" in captured.err
+    assert "[TemplateCall] Model: dummy" in captured.err
+
+
+def test_no_debug_output_by_default(
+    dummy_model, sample_template, sample_attachment, capsys, monkeypatch
+):
+    """Test that debug output is not shown by default."""
+    # Ensure environment variable is not set
+    monkeypatch.delenv("LLM_DO_DEBUG", raising=False)
+
+    tool = TemplateCall(
+        allow_templates=[str(sample_template)],
+        allowed_suffixes=[".txt"],
+        max_attachments=1,
+    )
+
+    result = tool.run(
+        template=str(sample_template),
+        input="test input",
+        attachments=[str(sample_attachment)],
+        expect_json=True,
+    )
+
+    # Check that the call succeeded
+    assert json.loads(result) == {"message": "ok"}
+
+    # Capture stderr output
+    captured = capsys.readouterr()
+
+    # Check that no debug output was written
+    assert "[TemplateCall]" not in captured.err
+
+
+def test_debug_explicit_false_overrides_env(
+    monkeypatch, dummy_model, sample_template, sample_attachment, capsys
+):
+    """Test that explicit debug=False overrides environment variable."""
+    # Set environment variable
+    monkeypatch.setenv("LLM_DO_DEBUG", "1")
+
+    tool = TemplateCall(
+        allow_templates=[str(sample_template)],
+        allowed_suffixes=[".txt"],
+        max_attachments=1,
+        debug=False,
+    )
+
+    result = tool.run(
+        template=str(sample_template),
+        input="test input",
+        attachments=[str(sample_attachment)],
+        expect_json=True,
+    )
+
+    # Check that the call succeeded
+    assert json.loads(result) == {"message": "ok"}
+
+    # Capture stderr output
+    captured = capsys.readouterr()
+
+    # Check that no debug output was written (explicit False wins)
+    assert "[TemplateCall]" not in captured.err

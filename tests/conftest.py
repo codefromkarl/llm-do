@@ -59,3 +59,34 @@ schema_object:
         """.strip()
     )
     return template
+
+
+@pytest.fixture
+def template_without_schema(tmp_path: Path) -> Path:
+    template = tmp_path / "template_no_schema.yaml"
+    template.write_text(
+        """
+model: dummy
+prompt: |
+  respond plainly
+        """.strip()
+    )
+    return template
+
+
+@pytest.fixture
+def template_without_model(tmp_path: Path) -> Path:
+    template = tmp_path / "template_no_model.yaml"
+    template.write_text(
+        """
+prompt: |
+  respond in json
+schema_object:
+  type: object
+  properties:
+    message:
+      type: string
+  required: [message]
+        """.strip()
+    )
+    return template
