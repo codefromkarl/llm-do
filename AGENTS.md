@@ -18,6 +18,8 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 - Tests use mock models, no real API calls
 - After changing templates, test with `llm -t <template>`
 - Style: black, 4 spaces, snake_case/PascalCase
+- **No backwards compatibility** — new project, no external users yet; breaking changes are fine if they improve design
+- **Balance simplicity with good design** — aim for clean architecture, but don't over-engineer; delete complexity when possible
 
 ---
 
