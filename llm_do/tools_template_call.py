@@ -251,24 +251,24 @@ class TemplateCall(llm.Toolbox):
 
     def _load_template(self, name: str) -> Template:
         cli = _llm_cli_module()
-        LoadTemplateError = cli.LoadTemplateError
-        parse_template = cli._parse_yaml_template
         if name.startswith("pkg:"):
             relative = name.split(":", 1)[1]
             package_root = resources.files("llm_do.templates")
             resource = package_root.joinpath(relative)
             if not resource.is_file():
-                raise LoadTemplateError(f"Template not found in package: {relative}")
+                raise cli.LoadTemplateError(
+                    f"Template not found in package: {relative}"
+                )
             content = resource.read_text(encoding="utf-8")
-            template = parse_template(name, content)
-            return template
-        # Resolve relative paths to absolute
-        path = Path(name).resolve()
-        if not path.exists():
-            raise LoadTemplateError(f"Template not found: {name}")
-        content = path.read_text(encoding="utf-8")
-        template = parse_template(str(path), content)
-        return template
+            template_source = name
+        else:
+            # Resolve relative paths to absolute
+            path = Path(name).resolve()
+            if not path.exists():
+                raise cli.LoadTemplateError(f"Template not found: {name}")
+            content = path.read_text(encoding="utf-8")
+            template_source = str(path)
+        return cli._parse_yaml_template(template_source, content)
 
     def _resolve_attachments(self, attachment_paths: List[str]) -> List[llm.Attachment]:
         if len(attachment_paths) > self.config.max_attachments:
