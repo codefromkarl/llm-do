@@ -211,6 +211,43 @@ class TemplateCall(llm.Toolbox):
             return json.dumps(payload, sort_keys=True, indent=2)
         return text
 
+    def llm_worker_call(
+        self,
+        worker_name: str,
+        input: str = "",
+        attachments: Optional[List[str]] = None,
+        extra_context: Optional[List[str]] = None,
+        params: Optional[dict] = None,
+        expect_json: bool = False,
+    ) -> str:
+        """
+        Public LLM-facing tool for calling a named LLM worker/template.
+
+        TODO: Consider exposing additional aliases (for example, "delegate_task"
+        or "call_subtask") if specific models prefer alternate names.
+        """
+
+        return self.run(
+            template=worker_name,
+            input=input or "",
+            attachments=attachments,
+            fragments=extra_context,
+            params=params,
+            expect_json=expect_json,
+        )
+
+    def tools(self):
+        """Expose the llm_worker_call tool to LLMs."""
+
+        yield llm.Tool.function(
+            self.llm_worker_call,
+            name="llm_worker_call",
+            description=(
+                "Call a named LLM worker with its own context and optional "
+                "file attachments."
+            ),
+        )
+
     # helpers ----------------------------------------------------------
     def _display_tool_executions(self, content_blocks):
         """Display tool execution details similar to --tools-debug."""
