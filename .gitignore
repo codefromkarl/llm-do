@@ -136,3 +136,8 @@ Thumbs.db
 # Project specific
 *.tmp
 /tmp/
+
+
+examples/pitchdeck_eval/evaluations/
+examples/pitchdeck_eval/templates/generated/
+
