@@ -3,19 +3,28 @@ defaults:
   max_units: 10
   sub_template: ""
 system: |
-  You turn free-form tasks into concrete multi-step workflows.
+  You are the **worker_bootstrapper**. You turn free-form tasks into concrete
+  multi-step workflows by designing workers and then invoking them.
 
   Available tools:
   - Files_workspace_ro_list() and Files_workspace_ro_read_text() for reading files
   - Files_workspace_out_write_text() for writing/creating files
-  - llm_call(task, input, attachments, extra_context) to delegate work to a
-    specialized template/LLM worker with its own context and attachments
+  - llm_worker_call(worker_name, input, attachments, extra_context) to call a
+    named LLM worker/template with its own fixed instructions and context
   - TemplateHelpers_make_template(prompt_text) to generate a standard template
 
   Both Files toolboxes point to the current directory.
-  Use llm_call when you need a separate LLM worker to process a unit of work,
-  especially when that worker needs attachments or extra snippets of context
-  that shouldn't bloat your own prompt.
+
+  Phases:
+  1) **Bootstrap workers**: If no worker exists yet, design one with
+     TemplateHelpers_make_template and save it under templates/generated/.
+  2) **Invoke workers**: Use llm_worker_call to delegate a specific unit of work
+     to a named worker. You supply worker_name, input, and any attachments or
+     extra_context; the worker's prompt, tools, and model are preconfigured.
+
+  Use llm_worker_call when you need a separate LLM worker to process a unit of
+  work, especially when that worker needs attachments or extra snippets of
+  context that shouldn't bloat your own prompt.
 tools:
   - 'Files({"mode": "ro", "path": ".", "alias": "workspace_ro"})'
   - 'Files({"mode": "out", "path": ".", "alias": "workspace_out"})'
@@ -34,6 +43,7 @@ prompt: |
   2. If no sub_template provided, create a `.yaml` template in `templates/generated/`:
      - Use TemplateHelpers_make_template(prompt_text) to generate template content
      - Write it with Files_workspace_out_write_text
-  3. For each unit: call llm_call with the template, attachments, and
-     any relevant fragments, then write results using Files_workspace_out_write_text
+  3. For each unit: call llm_worker_call with the worker/template path,
+     attachments, and any relevant fragments, then write results using
+     Files_workspace_out_write_text
   4. Report units processed, output location, and template path for reuse

@@ -1,6 +1,6 @@
-# TemplateCall and llm_call: Design and Motivation
+# TemplateCall and llm_worker_call: Design and Motivation
 
-This document explains why `TemplateCall` exists, how it fits into the `llm-do` plugin architecture, and how the public tool `llm_call` exposes it to models.
+This document explains why `TemplateCall` exists, how it fits into the `llm-do` plugin architecture, and how the public tool `llm_worker_call` exposes it to models.
 
 ## Programmer vs LLM Perspective
 
@@ -10,7 +10,7 @@ This document explains why `TemplateCall` exists, how it fits into the `llm-do` 
   - fragment handling for extra context
   - structured outputs via `expect_json` + `schema_object`
   - model inheritance and security toggles
-- **LLMs** only see a generic tool named `llm_call` that means "delegate a subtask to another LLM worker with its own context and attachments." The model chooses a `task`, provides `input`, optional `attachments` and `extra_context`, and (optionally) `params`/`expect_json`. The model does not need to know anything about templates—the configuration lives behind the tool.
+- **LLMs** only see a generic tool named `llm_worker_call` that means "call a named LLM worker (preconfigured template) with its own context and attachments." The model chooses a `worker_name`, provides `input`, optional `attachments` and `extra_context`, and (optionally) `params`/`expect_json`. The worker's prompt, model, and allowed tools are defined elsewhere; the caller only passes arguments.
 
 ## What TemplateCall Does
 
@@ -52,10 +52,10 @@ LLM-facing tool surface (wired to the same implementation):
 
 ```yaml
 # Conceptual view of the tool the LLM sees
-- name: llm_call
-  description: Call a separate LLM worker with its own context and optional file attachments.
+- name: llm_worker_call
+  description: Call a named LLM worker with its own context and optional file attachments.
   params:
-    task: which worker/template to call
+    worker_name: which worker/template to call
     input: main text to process
     attachments: list of files to attach
     extra_context: optional snippets/rubrics
@@ -63,7 +63,7 @@ LLM-facing tool surface (wired to the same implementation):
     expect_json: request structured output when available
 ```
 
-`llm_call` maps parameters like this: `task` → `template`, `extra_context` → `fragments`, while `attachments`, `params`, and `expect_json` pass through with the same validation rules. (TODO: Consider adding additional tool aliases such as `delegate_task` or `call_subtask` if certain models respond better to alternate names.)
+`llm_worker_call` maps parameters like this: `worker_name` → `template`, `extra_context` → `fragments`, while `attachments`, `params`, and `expect_json` pass through with the same validation rules. (TODO: Consider adding additional tool aliases such as `delegate_task` or `call_subtask` if certain models respond better to alternate names.)
 
 ## Why Recursion Matters
 
@@ -77,7 +77,7 @@ This isn't just theoretical—it matters in practice. When your orchestrator nee
 
 ## The Two-Step Pattern in Practice
 
-Here's a simplified example showing how `TemplateCall` and `llm_call` fit into a pitch deck evaluation workflow:
+Here's a simplified example showing how `TemplateCall` and `llm_worker_call` fit into a pitch deck evaluation workflow:
 
 ```yaml
 # pitchdeck-orchestrator.yaml (pseudo-YAML, simplified)
@@ -87,7 +87,7 @@ system: |
 
 tools:
   - Files_list
-  - llm_call
+  - llm_worker_call
 
 params:
   max_decks: 5
@@ -96,8 +96,8 @@ params:
 # 1. Call Files_list to get pipeline/*.pdf
 # 2. Choose up to max_decks files based on task description
 # 3. For each chosen file:
-#    - Call llm_call with:
-#        task: "templates/pitchdeck-single.yaml" (locked)
+#    - Call llm_worker_call with:
+#        worker_name: "templates/pitchdeck-single.yaml" (locked)
 #        attachments: [the PDF]
 #        extra_context: ["PROCEDURE.md"]
 #        expect_json: true
@@ -142,7 +142,7 @@ The `examples/pitchdeck_eval` directory demonstrates this pattern. The orchestra
 
 1. Lists PDFs in `pipeline/` using `Files("ro:pipeline")`
 2. Chooses which ones to evaluate (based on the task description)
-3. Calls the locked `pitchdeck-single.yaml` template once per PDF via `llm_call`, passing:
+3. Calls the locked `pitchdeck-single.yaml` template once per PDF via `llm_worker_call`, passing:
    - The PDF as an attachment
    - `PROCEDURE.md` as a fragment (shared evaluation rubric)
    - Parameters like `deck_id` derived from the filename
@@ -169,9 +169,9 @@ The `TemplateCall` toolbox is implemented in `llm_do/tools_template_call.py`. Ke
 - If the child template does not declare a `model`, TemplateCall automatically inherits the parent template's model for the sub-call.
 - Inline Python functions in sub-templates are ignored by default (security); override via `allow_functions=True` if needed
 - Fragment files are read and passed as text to the template (useful for procedures, rubrics, or context snippets)
-- From the LLM's point of view, all of this is exposed as the single `llm_call` tool. The model only decides which `task` to call, what `input` to send, which files to attach, and any extra snippets of context.
+- From the LLM's point of view, all of this is exposed as the single `llm_worker_call` tool. The model only decides which `worker_name` to call, what `input` to send, which files to attach, and any extra snippets of context.
 
-There is currently no external code depending on this API, so the naming shift from `TemplateCall_run` to `llm_call` is not a breaking change. We're optimizing names now for clarity of mental models (programmer vs LLM) before external adoption.
+There is currently no external code depending on this API, so the naming shifts from `TemplateCall_run` → `llm_call` → `llm_worker_call` are not breaking changes. We're optimizing names now for clarity of mental models (programmer vs LLM, worker vs raw call) before external adoption.
 
 ## Future Directions
 

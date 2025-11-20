@@ -4,9 +4,9 @@ system: |
   Only touch files via the provided Files toolboxes:
   - Files_pipeline_ro_* is read-only and points at ./pipeline
   - Files_evaluations_out_* is writable and points at ./evaluations
-  You have a tool called llm_call for delegating to a pitch-deck worker with
-  its own context and attachments. Use llm_call exactly once per deck when you
-  need that worker to read the PDF and apply the rubric.
+  You have a tool called llm_worker_call for delegating to a pitch-deck worker
+  with its own context and attachments. Use llm_worker_call exactly once per
+  deck when you need that worker to read the PDF and apply the rubric.
 tools:
   - Files("ro:pipeline")
   - Files("out:evaluations")
@@ -49,7 +49,8 @@ prompt: |
   2. Load the evaluation procedure if `pipeline/PROCEDURE.md` exists using
      Files_pipeline_ro_read_text.
   3. For each PDF (one at a time):
-     - Call llm_call with:
+     - Call llm_worker_call with:
+       * worker_name: "templates/pitchdeck-single.yaml" (locked)
        * attachments: a list containing the absolute path to the PDF
        * extra_context: include the procedure text if available
        * expect_json: true
