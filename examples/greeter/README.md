@@ -54,15 +54,6 @@ llm-do examples/greeter.yaml \
   --input '{"message": "Hello!", "context": "formal"}'
 ```
 
-### Testing with mock replies
-
-For testing without API calls:
-
-```bash
-llm-do examples/greeter.yaml "Hello" \
-  --mock-reply '"Hello! How can I help you today?"'
-```
-
 ## Worker Definition
 
 The worker is defined in `../greeter.yaml`:

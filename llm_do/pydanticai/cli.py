@@ -1,8 +1,7 @@
 """CLI entry point for running PydanticAI-style workers.
 
-The CLI is intentionally lightweight so it can be layered on top of the core
-runtime without adding new dependencies. A mock agent runner is provided to
-support deterministic tests and scripted replies without requiring a live LLM.
+The CLI is intentionally lightweight and focused on production use cases.
+It provides a simple interface for running workers with live LLM models.
 """
 from __future__ import annotations
 
@@ -10,9 +9,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-from .base import AgentRunner, WorkerCreationProfile, WorkerRegistry, run_worker
+from .base import WorkerCreationProfile, WorkerRegistry, run_worker
 
 
 def _load_jsonish(value: str) -> Any:
@@ -37,25 +36,6 @@ def _load_profile(path: Optional[str]) -> WorkerCreationProfile:
     return WorkerCreationProfile.model_validate(data)
 
 
-def _build_mock_runner(reply: Any) -> AgentRunner:
-    """Return an agent runner that uses a pre-registered reply.
-
-    If *reply* is a mapping, the worker name is used to select a response with
-    a per-worker fallback to the top-level structure. Otherwise the reply is
-    returned verbatim. When an output schema is provided, the payload is
-    validated before being returned so that CLI usage mirrors real integrations
-    that honor worker schemas.
-    """
-
-    def _runner(definition, user_input, context, output_model):  # type: ignore[override]
-        payload = reply
-        if isinstance(reply, Dict):
-            payload = reply.get(definition.name, reply)
-        if output_model is not None:
-            return output_model.model_validate(payload)
-        return payload
-
-    return _runner
 
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -93,12 +73,6 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         dest="profile_path",
         default=None,
         help="Optional JSON profile file for creation defaults",
-    )
-    parser.add_argument(
-        "--mock-reply",
-        dest="mock_reply",
-        default=None,
-        help="Inline JSON or file path used to bypass live LLM calls",
     )
     parser.add_argument(
         "--attachments",
@@ -152,14 +126,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     profile = _load_profile(args.profile_path)
 
-    runner: Optional[AgentRunner]
-    if args.mock_reply is not None:
-        mock_payload = _load_jsonish(args.mock_reply)
-        runner = _build_mock_runner(mock_payload)
-    else:
-        runner = None
-
-    run_kwargs: Dict[str, Any] = dict(
+    result = run_worker(
         registry=registry,
         worker=worker_name,
         input_data=input_data,
@@ -167,10 +134,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         cli_model=args.cli_model,
         creation_profile=profile,
     )
-    if runner is not None:
-        run_kwargs["agent_runner"] = runner
-
-    result = run_worker(**run_kwargs)
 
     serialized = result.model_dump(mode="json")
     indent = 2 if args.pretty else None
