@@ -78,6 +78,8 @@ Workers invoke other workers with controlled inputs:
 - Model inheritance: worker definition → caller → CLI → error
 - Results can be structured (validated JSON) or freeform text
 
+See [Worker Delegation](docs/worker_delegation.md) for detailed design and examples.
+
 ### Tool Approval System
 Control which tools execute automatically vs. require human approval:
 - Pre-approved tools (read files, call specific workers) execute automatically
@@ -128,7 +130,9 @@ tests/
   test_pydanticai_cli.py
 
 docs/
-  concept_spec.md       # Detailed design philosophy
+  concept_spec.md           # Detailed design philosophy
+  worker_delegation.md      # Worker-to-worker delegation design
+  pydanticai_architecture.md
   pydanticai_base_plan.md
 ```
 
