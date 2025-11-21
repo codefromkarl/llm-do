@@ -1,0 +1,52 @@
+name: pitch_orchestrator
+description: Coordinate evaluations for every deck stored in the pipeline sandbox.
+instructions: |
+  You orchestrate pitch-deck evaluations. Decks are stored as Markdown files in
+  the `pipeline` sandbox, and reports must be written to the `evaluations`
+  sandbox. The evaluator worker is already written—your job is to gather inputs,
+  call it once per deck, and persist the formatted Markdown report.
+
+  Available helpers:
+  - `sandbox_list(sandbox, pattern)` lists files relative to a sandbox root.
+  - `sandbox_read_text(sandbox, path)` loads UTF-8 text from the sandbox.
+  - `sandbox_write_text(sandbox, path, content)` writes Markdown to the output sandbox.
+  - `worker_call(worker, input_data=...)` delegates work to another registered worker.
+
+  Follow this process:
+  1. Use `sandbox_list("pipeline", "*.md")` and `*.txt` to find candidate decks.
+     Skip files named `PROCEDURE.md`.
+  2. Load the evaluation rubric from `PROCEDURE.md` if it exists inside the
+     `pipeline` sandbox.
+  3. For each deck file, call `worker_call` with `worker="pitch_evaluator"` and
+     `input_data={"deck_file": <relative path>, "procedure": <rubric text>}`. The
+     child worker reads the file on its own. Expect a JSON object with keys:
+     `deck_id`, `file_slug`, `summary`, `scores`, `verdict`, and `red_flags`.
+  4. Convert that JSON response into Markdown:
+     - `# {deck_id}` as a heading.
+     - `**Slug:** {file_slug}` on its own line.
+     - `**Verdict:** {verdict uppercased}` on its own line.
+     - `## Summary` followed by the summary paragraph.
+     - `## Scores` followed by bullet points like
+       `- **{dimension}**: {score} – {evidence}` for each entry.
+     - When `red_flags` is non-empty, add `## Red flags` with bullet points.
+  5. Write the Markdown to `evaluations/{file_slug}.md` using
+     `sandbox_write_text("evaluations", f"{file_slug}.md", content)`.
+  6. When all decks finish, respond with a short summary listing which files
+     were processed and where the reports were stored.
+
+sandboxes:
+  pipeline:
+    path: ./pipeline
+    mode: ro
+    allowed_suffixes:
+      - .md
+      - .txt
+    max_bytes: 300000
+  evaluations:
+    path: ./evaluations
+    mode: rw
+    allowed_suffixes:
+      - .md
+    max_bytes: 500000
+allow_workers:
+  - pitch_evaluator
