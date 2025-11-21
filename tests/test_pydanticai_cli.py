@@ -48,7 +48,6 @@ def test_cli_runs_with_mock_reply(tmp_path):
     )
 
     assert result["output"] == {"ok": True}
-    assert result["deferred_requests"] == []
 
 
 def test_cli_supports_per_worker_reply_map(tmp_path):
@@ -69,4 +68,3 @@ def test_cli_supports_per_worker_reply_map(tmp_path):
     )
 
     assert result["output"] == reply_map["beta"]
-    assert result["deferred_requests"] == []

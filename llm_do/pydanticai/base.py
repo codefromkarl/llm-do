@@ -171,19 +171,28 @@ class WorkerCreationProfile(BaseModel):
         )
 
 
-class DeferredToolRequest(BaseModel):
-    """Represents a tool call that requires approval."""
+class ApprovalDecision(BaseModel):
+    """Decision from an approval prompt."""
 
-    tool_name: str
-    payload: Mapping[str, Any]
-    reason: Optional[str] = None
+    approved: bool
+    approve_for_session: bool = False
+    note: Optional[str] = None
+
+
+ApprovalCallback = Callable[[str, Mapping[str, Any], Optional[str]], ApprovalDecision]
+
+
+def _auto_approve_callback(
+    tool_name: str, payload: Mapping[str, Any], reason: Optional[str]
+) -> ApprovalDecision:
+    """Default callback that auto-approves all requests (for tests/non-interactive)."""
+    return ApprovalDecision(approved=True)
 
 
 class WorkerRunResult(BaseModel):
     """Structured result from a worker execution."""
 
     output: Any
-    deferred_requests: List[DeferredToolRequest] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -349,11 +358,26 @@ class SandboxManager:
 
 
 class ApprovalController:
-    """Apply tool rules and record deferred requests."""
+    """Apply tool rules with blocking approval prompts."""
 
-    def __init__(self, tool_rules: Mapping[str, ToolRule], *, requests: List[DeferredToolRequest]):
+    def __init__(
+        self,
+        tool_rules: Mapping[str, ToolRule],
+        *,
+        approval_callback: ApprovalCallback = _auto_approve_callback,
+    ):
         self.tool_rules = tool_rules
-        self.requests = requests
+        self.approval_callback = approval_callback
+        self.session_approvals: set[tuple[str, frozenset]] = set()
+
+    def _make_approval_key(self, tool_name: str, payload: Mapping[str, Any]) -> tuple[str, frozenset]:
+        """Create a hashable key for session approval tracking."""
+        try:
+            items = frozenset(payload.items())
+        except TypeError:
+            # If payload has unhashable values, use repr as fallback
+            items = frozenset((k, repr(v)) for k, v in payload.items())
+        return (tool_name, items)
 
     def maybe_run(
         self,
@@ -366,14 +390,21 @@ class ApprovalController:
             if not rule.allowed:
                 raise PermissionError(f"Tool '{tool_name}' is disallowed")
             if rule.approval_required:
-                self.requests.append(
-                    DeferredToolRequest(
-                        tool_name=tool_name,
-                        payload=dict(payload),
-                        reason=rule.description,
-                    )
-                )
-                return None
+                # Check session approvals
+                key = self._make_approval_key(tool_name, payload)
+                if key in self.session_approvals:
+                    return func()
+
+                # Block and wait for approval
+                decision = self.approval_callback(tool_name, payload, rule.description)
+                if not decision.approved:
+                    note = f": {decision.note}" if decision.note else ""
+                    raise PermissionError(f"User rejected tool call '{tool_name}'{note}")
+
+                # Track session approval if requested
+                if decision.approve_for_session:
+                    self.session_approvals.add(key)
+
         return func()
 
 
@@ -632,6 +663,7 @@ def run_worker(
     cli_model: Optional[ModelLike] = None,
     creation_profile: Optional[WorkerCreationProfile] = None,
     agent_runner: AgentRunner = _default_agent_runner,
+    approval_callback: ApprovalCallback = _auto_approve_callback,
 ) -> WorkerRunResult:
     definition = registry.load_definition(worker)
 
@@ -644,8 +676,7 @@ def run_worker(
 
     effective_model = definition.model or caller_effective_model or cli_model
 
-    deferred: List[DeferredToolRequest] = []
-    approvals = ApprovalController(definition.tool_rules, requests=deferred)
+    approvals = ApprovalController(definition.tool_rules, approval_callback=approval_callback)
     sandbox_tools = SandboxToolset(sandbox_manager, approvals)
 
     context = WorkerContext(
@@ -671,12 +702,14 @@ def run_worker(
     else:
         output = raw_output
 
-    return WorkerRunResult(output=output, deferred_requests=deferred)
+    return WorkerRunResult(output=output)
 
 
 __all__: Iterable[str] = [
     "AgentRunner",
+    "ApprovalCallback",
     "ApprovalController",
+    "ApprovalDecision",
     "AttachmentPolicy",
     "ToolRule",
     "SandboxConfig",
@@ -685,7 +718,6 @@ __all__: Iterable[str] = [
     "WorkerCreationProfile",
     "WorkerRegistry",
     "WorkerRunResult",
-    "DeferredToolRequest",
     "run_worker",
     "call_worker",
     "create_worker",

@@ -1,9 +1,10 @@
 """PydanticAI-inspired runtime utilities for llm-do."""
 from .base import (
     AgentRunner,
+    ApprovalCallback,
     ApprovalController,
+    ApprovalDecision,
     AttachmentPolicy,
-    DeferredToolRequest,
     SandboxConfig,
     SandboxManager,
     SandboxToolset,
@@ -21,9 +22,10 @@ from .base import (
 
 __all__ = [
     "AgentRunner",
+    "ApprovalCallback",
     "ApprovalController",
+    "ApprovalDecision",
     "AttachmentPolicy",
-    "DeferredToolRequest",
     "SandboxConfig",
     "SandboxManager",
     "SandboxToolset",

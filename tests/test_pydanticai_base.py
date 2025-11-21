@@ -6,7 +6,9 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart
 from pydantic_ai.models import Model
 
 from llm_do.pydanticai import (
+    ApprovalCallback,
     ApprovalController,
+    ApprovalDecision,
     SandboxConfig,
     SandboxManager,
     SandboxToolset,
@@ -140,16 +142,19 @@ def test_sandbox_write_requires_approval(tmp_path, registry):
         ctx.sandbox_toolset.write_text("out", "note.txt", "hello")
         return {"worker": defn.name, "input": input_data, "model": ctx.effective_model}
 
-    result = run_worker(
-        registry=registry,
-        worker="writer",
-        input_data="",
-        cli_model="model-x",
-        agent_runner=runner,
-    )
+    def reject_callback(tool_name, payload, reason):
+        return ApprovalDecision(approved=False, note="Test rejection")
 
-    assert result.deferred_requests
-    assert result.deferred_requests[0].tool_name == "sandbox.write"
+    with pytest.raises(PermissionError, match="User rejected tool call 'sandbox.write': Test rejection"):
+        run_worker(
+            registry=registry,
+            worker="writer",
+            input_data="",
+            cli_model="model-x",
+            agent_runner=runner,
+            approval_callback=reject_callback,
+        )
+
     assert not (sandbox_path / "note.txt").exists()
 
 
@@ -183,7 +188,7 @@ def test_call_worker_respects_allowlist(registry):
     def simple_runner(defn, input_data, ctx, output_model):
         return {"worker": defn.name, "input": input_data, "model": ctx.effective_model}
 
-    controller = ApprovalController(parent_def.tool_rules, requests=[])
+    controller = ApprovalController(parent_def.tool_rules)
     sandbox_manager = SandboxManager(parent_def.sandboxes)
     parent_context = WorkerContext(
         registry=registry,
