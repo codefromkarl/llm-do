@@ -1,8 +1,8 @@
 name: pitch_orchestrator
-description: Coordinate evaluations for every deck stored in the pipeline sandbox.
+description: Coordinate evaluations for every deck stored in the input sandbox.
 instructions: |
   You orchestrate pitch-deck evaluations. Decks are stored as Markdown files in
-  the `pipeline` sandbox, and reports must be written to the `evaluations`
+  the `input` sandbox, and reports must be written to the `evaluations`
   sandbox. The evaluator worker is already written—your job is to gather inputs,
   call it once per deck, and persist the formatted Markdown report.
 
@@ -13,10 +13,10 @@ instructions: |
   - `worker_call(worker, input_data=...)` delegates work to another registered worker.
 
   Follow this process:
-  1. Use `sandbox_list("pipeline", "*.md")` and `*.txt` to find candidate decks.
+  1. Use `sandbox_list("input", "*.md")` and `*.txt` to find candidate decks.
      Skip files named `PROCEDURE.md`.
   2. Load the evaluation rubric from `PROCEDURE.md` if it exists inside the
-     `pipeline` sandbox.
+     `input` sandbox.
   3. For each deck file, call `worker_call` with `worker="pitch_evaluator"` and
      `input_data={"deck_file": <relative path>, "procedure": <rubric text>}`. The
      child worker reads the file on its own. Expect a JSON object with keys:
@@ -35,8 +35,8 @@ instructions: |
      were processed and where the reports were stored.
 
 sandboxes:
-  pipeline:
-    path: ./pipeline
+  input:
+    path: ./input
     mode: ro
     allowed_suffixes:
       - .md

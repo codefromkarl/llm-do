@@ -99,18 +99,85 @@ Workers can create specialized sub-workers when they identify the need:
 - Created workers start with minimal permissions
 - Saved definitions are immediately executable
 
-## Example: Pitch Deck Evaluation
+## Examples
+
+### Example 1: Greeter (Quick Start)
+
+A simple single-worker example to verify your setup works.
+
+**Worker**: `examples/greeter.yaml`
+- No sandboxes or special tools
+- Just responds to messages conversationally
+- Perfect for testing basic functionality
+
+**Run it:**
+```bash
+cd examples
+llm-do greeter.yaml "Hello, how are you?" --model anthropic:claude-sonnet-4-20250514
+```
+
+Expected output: Friendly greeting and response in JSON format.
+
+---
+
+### Example 2: Pitch Deck Evaluation (Multi-Worker)
+
+A complete workflow demonstrating worker delegation, sandboxes, and structured outputs.
 
 **Scenario**: Evaluate multiple pitch decks using a shared rubric.
 
-**Orchestrator worker**:
-1. Lists PDFs in sandbox
-2. For each PDF, calls locked evaluator worker
-3. Passes PDF + rubric
-4. Gets back structured JSON
-5. Writes formatted report
+**Structure:**
+```
+examples/pitchdeck_eval/
+  workers/
+    pitch_orchestrator.yaml  # Coordinates evaluation workflow
+    pitch_evaluator.yaml     # Scores individual decks
+  input/
+    PROCEDURE.md            # Evaluation rubric
+    aurora_solar.md         # Sample pitch deck
+  evaluations/              # Output directory (reports written here)
+```
 
-Each PDF gets isolated worker invocation = reproducible results, testable components.
+**How it works:**
+1. **Orchestrator** lists `.md` files in `input/` sandbox (read-only)
+2. For each deck, **orchestrator** calls **evaluator** worker via `worker_call()`
+3. **Evaluator** reads deck file, applies rubric, returns structured JSON
+4. **Orchestrator** converts JSON to Markdown report
+5. **Orchestrator** writes report to `evaluations/` sandbox (writable)
+
+**Run it:**
+```bash
+cd examples/pitchdeck_eval
+llm-do workers/pitch_orchestrator.yaml \
+  "Evaluate all pitch decks in the pipeline" \
+  --model anthropic:claude-sonnet-4-20250514
+
+# If you don't want to approve writes interactively:
+llm-do workers/pitch_orchestrator.yaml \
+  "Evaluate all pitch decks in the pipeline" \
+  --model anthropic:claude-sonnet-4-20250514 \
+  --approve-all
+```
+
+**What you'll see:**
+- Orchestrator discovers `aurora_solar.md`
+- Delegates evaluation to `pitch_evaluator` worker
+- Approval prompt for writing `evaluations/aurora-solar.md` (unless using `--approve-all`)
+- Formatted report written to `evaluations/aurora-solar.md`
+
+**Try it yourself:**
+- Add more pitch decks: Drop `.md` or `.txt` files into `input/`
+- Customize rubric: Edit `input/PROCEDURE.md` to change scoring dimensions
+- Adjust worker behavior: Edit `workers/pitch_evaluator.yaml` instructions
+
+**Key features demonstrated:**
+- **Sandboxed file access**: Read-only `input/`, writable `evaluations/`
+- **Worker delegation**: Orchestrator calls evaluator with `allow_workers` list
+- **Model inheritance**: Both workers use CLI-specified model
+- **Structured outputs**: Evaluator returns validated JSON
+- **Tool approval**: Write operations can be gated (see `tool_rules`)
+
+Each deck gets isolated worker invocation = reproducible results, testable components.
 
 ## Progressive Hardening Workflow
 
@@ -157,19 +224,20 @@ Dependencies:
 
 ## Current Status
 
-✅ Implemented:
+✅ **Core functionality complete:**
 - Worker artifacts (definition/spec/defaults) with YAML persistence
-- WorkerRegistry with file-backed storage
+- WorkerRegistry with file-backed storage and CWD defaults
 - Sandboxed file access with escape prevention
-- Tool approval system with deferred requests
-- Model inheritance (definition → caller → CLI)
-- Mock runner for deterministic testing
-- CLI with mock reply support
+- Tool approval system with configurable policies
+- Worker-to-worker delegation (`worker_call`, `worker_create` tools)
+- Model inheritance chain (definition → caller → CLI)
+- CLI with approval modes (`--approve-all`, `--strict`)
+- Comprehensive test coverage with mock models
 
-🚧 In progress:
-- Worker-to-worker delegation tools (call_worker, create_worker not exposed to agents yet)
-- Output schema resolution
-- Real PydanticAI integration (currently uses mock runners for tests)
+🚧 **In progress:**
+- Output schema resolution (pluggable resolver exists, needs production implementation)
+- Interactive approval prompts in CLI (callback system works, CLI integration pending)
+- Scaffolding builder for project initialization
 
 ## Design Principles
 

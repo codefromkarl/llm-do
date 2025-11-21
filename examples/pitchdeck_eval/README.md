@@ -6,7 +6,7 @@ architecture:
 - `workers/pitch_orchestrator.yaml` — lists decks, delegates to the evaluator,
   and writes Markdown reports.
 - `workers/pitch_evaluator.yaml` — scores a single deck and returns JSON.
-- `pipeline/` — drop Markdown (`.md`/`.txt`) versions of pitch decks here. The
+- `input/` — drop Markdown (`.md`/`.txt`) versions of pitch decks here. The
   provided `aurora_solar.md` file acts as a sample input, and `PROCEDURE.md`
   contains the rubric shared with every run.
 - `evaluations/` — destination for generated reports.
@@ -35,8 +35,8 @@ llm-do pitch_orchestrator \
 
 What happens:
 
-1. The orchestrator lists `*.md` and `*.txt` files in the `pipeline` sandbox.
-2. The rubric in `pipeline/PROCEDURE.md` is read (if present) and sent to every
+1. The orchestrator lists `*.md` and `*.txt` files in the `input` sandbox.
+2. The rubric in `input/PROCEDURE.md` is read (if present) and sent to every
    evaluator call.
 3. Each deck triggers `worker_call(worker="pitch_evaluator", input_data={...})`.
 4. The evaluator reads the deck file via `sandbox_read_text`, produces JSON, and
@@ -49,10 +49,10 @@ Open `evaluations/` afterwards to inspect the Markdown summaries.
 
 ## Customizing
 
-- Add or edit files in `pipeline/` to evaluate different companies. A deck can be
+- Add or edit files in `input/` to evaluate different companies. A deck can be
   any Markdown or text file that roughly describes the problem, solution, team,
   traction, and financial model. (Convert PDFs to text before running.)
-- Modify `pipeline/PROCEDURE.md` to change the rubric. The orchestrator sends the
+- Modify `input/PROCEDURE.md` to change the rubric. The orchestrator sends the
   entire file to the evaluator as part of `input_data` so you can adapt the
   schema without touching Python.
 - Update the worker YAML definitions to tweak tool policies, change sandboxes, or
@@ -62,13 +62,13 @@ Open `evaluations/` afterwards to inspect the Markdown summaries.
 
 `pitch_orchestrator` demonstrates several primitives from the new runtime:
 
-- Multiple sandboxes (`pipeline` read-only, `evaluations` read/write)
+- Multiple sandboxes (`input` read-only, `evaluations` read/write)
 - `worker_call` to delegate to a locked evaluator worker
 - `sandbox_write_text` for report generation
 - Tight `allow_workers` list so only `pitch_evaluator` can run from this worker
 
 `pitch_evaluator` stays focused on deterministic output formatting: it only reads
-from the pipeline sandbox and emits structured JSON. Because both workers inherit
+from the input sandbox and emits structured JSON. Because both workers inherit
 whatever `--model` you pass on the CLI, delegation feels like a normal function
 call with shared settings.
 
@@ -78,5 +78,5 @@ call with shared settings.
 rm -f evaluations/*.md
 ```
 
-Leave `aurora_solar.md` (or add your own decks) in `pipeline/` and rerun the
+Leave `aurora_solar.md` (or add your own decks) in `input/` and rerun the
 command above to regenerate reports.

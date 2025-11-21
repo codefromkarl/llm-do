@@ -3,11 +3,11 @@ description: Score a single Markdown pitch deck using the shared rubric.
 instructions: |
   You are the specialist who evaluates one pitch deck at a time. Input data will
   always include:
-  - `deck_file`: relative path to the Markdown deck within the `pipeline` sandbox
+  - `deck_file`: relative path to the Markdown deck within the `input` sandbox
   - `procedure`: the evaluation rubric text (may be empty)
 
   Tools available inside this worker:
-  - `sandbox_read_text("pipeline", path)` to read the deck file.
+  - `sandbox_read_text("input", path)` to read the deck file.
 
   Requirements:
   1. Read the deck file and understand the business, traction, team, and market.
@@ -25,8 +25,8 @@ instructions: |
      the orchestrator can render Markdown without guessing.
 
 sandboxes:
-  pipeline:
-    path: ./pipeline
+  input:
+    path: ./input
     mode: ro
     allowed_suffixes:
       - .md
