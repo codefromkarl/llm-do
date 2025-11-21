@@ -414,7 +414,6 @@ class WorkerContext:
     creation_profile: WorkerCreationProfile
     effective_model: Optional[ModelLike]
     attachments: List[Path] = field(default_factory=list)
-    caller_effective_model: Optional[ModelLike] = None
 
 
 AgentRunner = Callable[[WorkerDefinition, Any, WorkerContext, Optional[Type[BaseModel]]], Any]
@@ -570,7 +569,6 @@ def run_worker(
         creation_profile=profile,
         effective_model=effective_model,
         attachments=attachment_list,
-        caller_effective_model=caller_effective_model,
     )
 
     output_model = registry.resolve_output_schema(definition)
