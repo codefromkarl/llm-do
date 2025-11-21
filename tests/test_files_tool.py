@@ -12,7 +12,7 @@ def _make_toolset(root, *, mode="rw", allowed_suffixes=None, max_bytes=2_000_000
         max_bytes=max_bytes,
     )
     manager = SandboxManager({"work": cfg})
-    approvals = ApprovalController({}, requests=[])
+    approvals = ApprovalController({})
     return manager, SandboxToolset(manager, approvals)
 
 

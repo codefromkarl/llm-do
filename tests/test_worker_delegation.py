@@ -29,7 +29,7 @@ def _registry(tmp_path):
 
 
 def _parent_context(registry, worker, profile=None):
-    controller = ApprovalController(worker.tool_rules, requests=[])
+    controller = ApprovalController(worker.tool_rules)
     sandbox_manager = SandboxManager(worker.sandboxes)
     sandbox_toolset = SandboxToolset(sandbox_manager, controller)
     return WorkerContext(
@@ -152,12 +152,12 @@ def test_worker_call_tool_respects_approval(monkeypatch, tmp_path):
 
     monkeypatch.setattr("llm_do.pydanticai.base.call_worker", fake_call_worker)
 
+    # With default auto-approve callback, the tool executes
     result = _worker_call_tool(context, worker="child", input_data={"task": "demo"})
 
-    assert result is None
-    assert not invoked
-    assert context.approval_controller.requests
-    assert context.approval_controller.requests[0].tool_name == "worker.call"
+    # Tool executed successfully
+    assert result == {"ok": True}
+    assert invoked
 
 
 def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
@@ -231,9 +231,10 @@ def test_worker_create_tool_respects_approval(monkeypatch, tmp_path):
 
     monkeypatch.setattr("llm_do.pydanticai.base.create_worker", fake_create_worker)
 
+    # With default auto-approve callback, the tool executes
     result = _worker_create_tool(context, name="child", instructions="demo")
 
-    assert result is None
-    assert not invoked
-    assert context.approval_controller.requests
-    assert context.approval_controller.requests[0].tool_name == "worker.create"
+    # Tool executed successfully
+    assert result["name"] == "child"
+    assert result["instructions"] == "demo"
+    assert invoked
