@@ -56,7 +56,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--registry",
         type=Path,
         default=None,
-        help="Path to the worker registry root (inferred from worker path if not provided)",
+        help="Path to the worker registry root (defaults to current working directory)",
     )
     parser.add_argument(
         "--input",
@@ -106,19 +106,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         worker_path = Path(args.worker)
         if worker_path.exists() and worker_path.suffix in {".yaml", ".yml"}:
             # Worker is a file path
-            if args.registry is None:
-                # Infer registry from worker path directory
-                registry_root = worker_path.parent
-            else:
-                registry_root = args.registry
             worker_name = worker_path.stem
         else:
-            # Worker is a name, registry must be provided or use current directory
-            if args.registry is None:
-                registry_root = Path(".")
-            else:
-                registry_root = args.registry
+            # Worker is a name
             worker_name = args.worker
+
+        # Registry defaults to current working directory
+        if args.registry is None:
+            registry_root = Path.cwd()
+        else:
+            registry_root = args.registry
 
         registry = WorkerRegistry(registry_root)
 

@@ -314,10 +314,12 @@ Run it like this:
 
 ```bash
 cd examples/pitchdeck_eval
-llm-do orchestrator \
-  --registry ./workers \
+llm-do workers/orchestrator.yaml \
   --input '{"instruction": "evaluate every deck using the standard rubric"}' \
   --model claude-sonnet-4
+
+# Worker file path is used, registry defaults to CWD (examples/pitchdeck_eval)
+# Workers will be loaded from ./workers/ relative to CWD
 ```
 
 ## Implementation Notes

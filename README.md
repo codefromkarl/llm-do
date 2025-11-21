@@ -29,6 +29,12 @@ sandboxes:
 
 Run from CLI:
 ```bash
+cd /path/to/project  # Registry defaults to current working directory
+llm-do evaluator \
+  --input '{"rubric": "PROCEDURE.md"}' \
+  --attachments document.pdf
+
+# Or specify registry explicitly:
 llm-do evaluator \
   --registry ./workers \
   --input '{"rubric": "PROCEDURE.md"}' \
