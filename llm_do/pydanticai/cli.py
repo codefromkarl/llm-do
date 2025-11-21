@@ -60,18 +60,27 @@ def _build_mock_runner(reply: Any) -> AgentRunner:
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a PydanticAI worker")
-    parser.add_argument("worker", help="Name of the worker to execute")
+    parser.add_argument(
+        "worker",
+        help="Worker name or path to .yaml file (e.g., 'greeter' or 'examples/greeter.yaml')",
+    )
+    parser.add_argument(
+        "message",
+        nargs="?",
+        default=None,
+        help="Input message (plain text). Use --input for JSON instead.",
+    )
     parser.add_argument(
         "--registry",
         type=Path,
-        required=True,
-        help="Path to the worker registry root",
+        default=None,
+        help="Path to the worker registry root (inferred from worker path if not provided)",
     )
     parser.add_argument(
         "--input",
-        dest="input_data",
-        default="{}",
-        help="JSON payload or path to JSON file for worker input",
+        dest="input_json",
+        default=None,
+        help="JSON payload or path to JSON file for worker input (alternative to plain message)",
     )
     parser.add_argument(
         "--model",
@@ -98,9 +107,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Attachment file paths passed to the worker",
     )
     parser.add_argument(
-        "--pretty",
-        action="store_true",
-        help="Pretty-print JSON output",
+        "--no-pretty",
+        dest="pretty",
+        action="store_false",
+        default=True,
+        help="Disable pretty-printing of JSON output",
     )
     return parser.parse_args(argv)
 
@@ -108,8 +119,37 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
 
-    registry = WorkerRegistry(args.registry)
-    input_data = _load_jsonish(args.input_data)
+    # Determine worker name and registry
+    worker_path = Path(args.worker)
+    if worker_path.exists() and worker_path.suffix in {".yaml", ".yml"}:
+        # Worker is a file path
+        if args.registry is None:
+            # Infer registry from worker path directory
+            registry_root = worker_path.parent
+        else:
+            registry_root = args.registry
+        worker_name = worker_path.stem
+    else:
+        # Worker is a name, registry must be provided or use current directory
+        if args.registry is None:
+            registry_root = Path(".")
+        else:
+            registry_root = args.registry
+        worker_name = args.worker
+
+    registry = WorkerRegistry(registry_root)
+
+    # Determine input data
+    if args.input_json is not None:
+        # Use JSON input if provided
+        input_data = _load_jsonish(args.input_json)
+    elif args.message is not None:
+        # Use plain text message
+        input_data = args.message
+    else:
+        # Default to empty input
+        input_data = {}
+
     profile = _load_profile(args.profile_path)
 
     runner: Optional[AgentRunner]
@@ -121,7 +161,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     run_kwargs: Dict[str, Any] = dict(
         registry=registry,
-        worker=args.worker,
+        worker=worker_name,
         input_data=input_data,
         attachments=args.attachments,
         cli_model=args.cli_model,
