@@ -9,7 +9,7 @@ This document reviews the proposed PydanticAI + Jinja architecture for `llm-do`,
 | Sandboxed file access | ✅ Supported via `SandboxManager` enforcing roots, modes, suffix and size caps. Approval wrapper can gate writes. |
 | Worker-to-worker delegation | ✅ Built-in through a `call_worker` tool that respects allowlists and model inheritance. |
 | Tool approval / human-in-the-loop | ✅ Uses `ApprovalRequiredToolset` to defer calls; host can resume with `DeferredToolResults`. |
-| Autonomous worker creation | ✅ `create_worker(spec)` gives the LLM a single-parameter flow; profiles apply policies. |
+| Autonomous worker creation | ✅ `create_worker(spec)` gives the LLM a single-parameter flow; creation defaults apply policies. |
 | Progressive hardening | ✅ File-backed workers, schemas, allowlists, and locks create the artifact surface for iteration. |
 | CLI/host ergonomics | ✅ `run_worker` offers a single entry point with history/deferred support. |
 | Security defaults | ⚠️ Good foundations, but attachment validation and sandbox total-size accounting need explicit hooks. |
@@ -27,13 +27,13 @@ Workers live as file-backed artifacts, editable without Python:
 
 - **`WorkerDefinition` (YAML/JSON):** name, description, instructions (Jinja/plain), optional `model`, optional `output_schema_ref`, sandbox configs, attachment policy, worker allowlist, tool rules, `locked` flag.
 - **`WorkerSpec` (LLM-facing):** minimal single-argument schema (`name`, `instructions`, optional `output_schema_ref`) used by `create_worker`.
-- **`WorkerCreationProfile` (Python config):** default sandboxes, attachment policy, tool rules, allowlist, and optional default model applied when expanding a `WorkerSpec` into a persisted definition.
+- **`WorkerCreationDefaults` (Python config):** default sandboxes, attachment policy, tool rules, allowlist, and optional default model applied when expanding a `WorkerSpec` into a persisted definition.
 
-Creation flow: LLM proposes a `WorkerSpec` → approval → runtime expands with the active `WorkerCreationProfile` → `WorkerDefinition` saved to disk.
+Creation flow: LLM proposes a `WorkerSpec` → approval → runtime expands with the active `WorkerCreationDefaults` → `WorkerDefinition` saved to disk.
 
 ### Runtime context and model inheritance
 
-`WorkerContext` is shared across tools during a run. It holds the current worker definition, registry handle, sandbox manager, creation profile, effective model, run ID, attachments, and clock.
+`WorkerContext` is shared across tools during a run. It holds the current worker definition, registry handle, sandbox manager, creation defaults, effective model, run ID, attachments, and clock.
 
 Effective model selection follows a simple rule:
 
@@ -45,7 +45,7 @@ Top-level runs use `cli_model` unless the worker pins a model. Delegated calls i
 
 ### Registry and execution API
 
-- **`WorkerRegistry`**: resolves file paths, loads/saves definitions, and resolves output schemas. Construction is light; policies live in toolsets/profiles.
+- **`WorkerRegistry`**: resolves file paths, loads/saves definitions, and resolves output schemas. Construction is light; policies live in toolsets/defaults.
 - **`run_worker`**: single entry point for hosts/CLI. Steps:
   1. Load definition and compute `effective_model`.
   2. Resolve output schema into a Pydantic model (or `DeferredToolRequests`).
@@ -66,7 +66,7 @@ Hosts can surface deferred tools for approval and resume runs with preserved mes
 - `call_worker(worker, input)` verifies allowlists, builds a sub-agent with inherited model and toolset, and returns typed results. Usage accounting can be aggregated via the shared context.
 
 **Worker creation**
-- `create_worker(spec)` expands a `WorkerSpec` using the active profile, defaults `model=None` to allow inheritance, and saves the definition. Usually marked `approval_required`.
+- `create_worker(spec)` expands a `WorkerSpec` using the active creation defaults, defaults `model=None` to allow inheritance, and saves the definition. Usually marked `approval_required`.
 
 **Approval wrapper**
 - `build_worker_toolset` combines the base toolsets and applies per-worker `ToolRule` policies using `ApprovalRequiredToolset`, turning selected calls into deferred requests for human review.

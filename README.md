@@ -148,7 +148,7 @@ Dependencies:
 ## Current Status
 
 ✅ Implemented:
-- Worker artifacts (definition/spec/profile) with YAML persistence
+- Worker artifacts (definition/spec/defaults) with YAML persistence
 - WorkerRegistry with file-backed storage
 - Sandboxed file access with escape prevention
 - Tool approval system with deferred requests

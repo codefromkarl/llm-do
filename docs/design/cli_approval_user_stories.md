@@ -34,7 +34,7 @@
 
 ## Story 4 — Edit worker config to preapprove known-safe tools
 - **As** an operator who repeatedly approves the same safe tool calls,
-- **I want** to edit the worker’s YAML definition (or creation profile) to mark specific tools/paths as preapproved,
+- **I want** to edit the worker’s YAML definition (or creation defaults config) to mark specific tools/paths as preapproved,
 - **So that** future CLI runs skip the interactive prompt for those actions while still blocking anything else.
 
 **Acceptance Criteria**

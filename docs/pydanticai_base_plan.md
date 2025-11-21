@@ -4,33 +4,33 @@ This plan outlines the first-pass implementation of a PydanticAI-based architect
 
 ## Objectives for the base version
 - Provide an executable `run_worker` pipeline that loads worker definitions, resolves schemas, builds agents, executes with context, and returns structured results.
-- Ship foundational worker artifacts (`WorkerDefinition`, `WorkerSpec`, `WorkerCreationProfile`) with YAML/JSON persistence and profile expansion.
+- Ship foundational worker artifacts (`WorkerDefinition`, `WorkerSpec`, `WorkerCreationDefaults`) with YAML/JSON persistence and defaults expansion.
 - Implement core toolsets (sandboxed filesystem, worker delegation, worker creation) with policy-aware approval wrappers.
 - Enforce attachment and locking policies sufficiently to run safely in iterative environments.
 - Support progressive hardening by keeping schema resolution and approval hooks extensible.
 
 ## Delivery slices and milestones
 1. **Artifact and registry groundwork**
-   - Define Pydantic models for `WorkerDefinition`, `WorkerSpec`, `WorkerCreationProfile`, `AttachmentPolicy`, `ToolRule`, and `WorkerRunResult`.
+   - Define Pydantic models for `WorkerDefinition`, `WorkerSpec`, `WorkerCreationDefaults`, `AttachmentPolicy`, `ToolRule`, and `WorkerRunResult`.
    - Implement `WorkerRegistry` to resolve paths, load/save definitions, and look up output schemas via a pluggable resolver.
    - Add YAML/JSON read/write helpers and minimal validation (e.g., locked workers cannot be overwritten without force).
 
 2. **Runtime context and agent assembly**
-   - Create `WorkerContext` carrying registry handle, active profiles, sandbox manager, effective model, attachments, and run metadata.
+   - Create `WorkerContext` carrying registry handle, active creation defaults, sandbox manager, effective model, attachments, and run metadata.
    - Implement `run_worker` that selects the effective model (worker → caller → CLI), resolves the output schema, and instantiates an Agent with worker instructions and toolsets.
    - Return `WorkerRunResult` including output, deferred tool requests, and usage accounting scaffold.
 
 3. **Sandboxed filesystem toolset**
    - Integrate a `SandboxManager` enforcing root scoping, RO/RW modes, suffix and size limits, and total-size accounting.
    - Wrap PydanticAI filesystem helpers (read/write/list) with sandbox path resolution and approval gating for writes.
-   - Provide configuration hooks so per-worker rules (from `ToolRule`/profiles) can mark writes as approval-required or disallowed.
+   - Provide configuration hooks so per-worker rules (from `ToolRule`/defaults) can mark writes as approval-required or disallowed.
 
 4. **Worker delegation toolset**
    - Implement `call_worker(worker, input)` that checks allowlists, inherits the caller’s effective model when the callee is unset, and forwards context history/attachments as allowed.
    - Ensure delegated runs contribute to aggregated usage accounting and return typed results aligned with the callee’s schema.
 
 5. **Worker creation and approval flow**
-   - Build `create_worker(spec)` that expands a `WorkerSpec` using the active `WorkerCreationProfile`, defaults model to inherit unless pinned, and persists via the registry.
+   - Build `create_worker(spec)` that expands a `WorkerSpec` using the active `WorkerCreationDefaults`, defaults model to inherit unless pinned, and persists via the registry.
    - Mark creation and high-risk tools as approval-required by default; implement `ApprovalRequiredToolset` wrapping to produce deferred tool requests.
    - Add resume hooks so hosts can approve and re-run deferred calls with preserved history.
 

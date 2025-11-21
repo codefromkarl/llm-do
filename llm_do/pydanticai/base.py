@@ -3,7 +3,7 @@
 This module implements the initial slice described in
 ``docs/pydanticai_base_plan.md``. It provides:
 
-- Worker artifacts (definition/spec/profile) with YAML/JSON persistence via
+- Worker artifacts (definition/spec/defaults) with YAML/JSON persistence via
   ``WorkerRegistry``.
 - Runtime orchestration through ``run_worker`` using a pluggable agent runner
   (LLM integration can be layered on later).
@@ -137,7 +137,7 @@ class WorkerSpec(BaseModel):
     model: Optional[str] = None
 
 
-class WorkerCreationProfile(BaseModel):
+class WorkerCreationDefaults(BaseModel):
     """Host-configured defaults used when persisting workers."""
 
     default_model: Optional[str] = None
@@ -459,7 +459,7 @@ class WorkerContext:
     worker: WorkerDefinition
     sandbox_manager: SandboxManager
     sandbox_toolset: SandboxToolset
-    creation_profile: WorkerCreationProfile
+    creation_defaults: WorkerCreationDefaults
     effective_model: Optional[ModelLike]
     approval_controller: ApprovalController
     attachments: List[Path] = field(default_factory=list)
@@ -588,7 +588,7 @@ def _worker_create_tool(
         created = create_worker(
             registry=ctx.registry,
             spec=spec,
-            profile=ctx.creation_profile,
+            defaults=ctx.creation_defaults,
             force=force,
         )
         return created.model_dump(mode="json")
@@ -651,7 +651,7 @@ def call_worker(
         input_data=input_data,
         caller_effective_model=caller_context.effective_model,
         attachments=attachments,
-        creation_profile=caller_context.creation_profile,
+        creation_defaults=caller_context.creation_defaults,
         agent_runner=agent_runner,
     )
 
@@ -662,10 +662,10 @@ def create_worker(
     registry: WorkerRegistry,
     spec: WorkerSpec,
     *,
-    profile: WorkerCreationProfile,
+    defaults: WorkerCreationDefaults,
     force: bool = False,
 ) -> WorkerDefinition:
-    definition = profile.expand_spec(spec)
+    definition = defaults.expand_spec(spec)
     registry.save_definition(definition, force=force)
     return definition
 
@@ -680,14 +680,14 @@ def run_worker(
     attachments: Optional[List[Path]] = None,
     caller_effective_model: Optional[ModelLike] = None,
     cli_model: Optional[ModelLike] = None,
-    creation_profile: Optional[WorkerCreationProfile] = None,
+    creation_defaults: Optional[WorkerCreationDefaults] = None,
     agent_runner: AgentRunner = _default_agent_runner,
     approval_callback: ApprovalCallback = _auto_approve_callback,
 ) -> WorkerRunResult:
     definition = registry.load_definition(worker)
 
-    profile = creation_profile or WorkerCreationProfile()
-    sandbox_manager = SandboxManager(definition.sandboxes or profile.default_sandboxes)
+    defaults = creation_defaults or WorkerCreationDefaults()
+    sandbox_manager = SandboxManager(definition.sandboxes or defaults.default_sandboxes)
 
     attachment_policy = definition.attachment_policy
     attachment_list = [Path(path).expanduser().resolve() for path in attachments or []]
@@ -703,7 +703,7 @@ def run_worker(
         worker=definition,
         sandbox_manager=sandbox_manager,
         sandbox_toolset=sandbox_tools,
-        creation_profile=profile,
+        creation_defaults=defaults,
         effective_model=effective_model,
         attachments=attachment_list,
         approval_controller=approvals,
@@ -736,7 +736,7 @@ __all__: Iterable[str] = [
     "SandboxConfig",
     "WorkerDefinition",
     "WorkerSpec",
-    "WorkerCreationProfile",
+    "WorkerCreationDefaults",
     "WorkerRegistry",
     "WorkerRunResult",
     "run_worker",

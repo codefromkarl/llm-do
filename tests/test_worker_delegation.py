@@ -11,7 +11,7 @@ from llm_do.pydanticai import (
     SandboxManager,
     SandboxToolset,
     ToolRule,
-    WorkerCreationProfile,
+    WorkerCreationDefaults,
     WorkerDefinition,
     WorkerRegistry,
     WorkerSpec,
@@ -28,7 +28,7 @@ def _registry(tmp_path):
     return WorkerRegistry(root)
 
 
-def _parent_context(registry, worker, profile=None):
+def _parent_context(registry, worker, defaults=None):
     controller = ApprovalController(worker.tool_rules)
     sandbox_manager = SandboxManager(worker.sandboxes)
     sandbox_toolset = SandboxToolset(sandbox_manager, controller)
@@ -37,7 +37,7 @@ def _parent_context(registry, worker, profile=None):
         worker=worker,
         sandbox_manager=sandbox_manager,
         sandbox_toolset=sandbox_toolset,
-        creation_profile=profile or WorkerCreationProfile(),
+        creation_defaults=defaults or WorkerCreationDefaults(),
         effective_model="cli-model",
         approval_controller=controller,
     )
@@ -104,14 +104,14 @@ def test_call_worker_rejects_disallowed_attachments(tmp_path):
 def test_create_worker_defaults_allow_delegation(tmp_path):
     registry = _registry(tmp_path)
     sandbox = SandboxConfig(name="shared", path=tmp_path / "shared", mode="rw")
-    profile = WorkerCreationProfile(
-        default_model="profile-model",
+    defaults = WorkerCreationDefaults(
+        default_model="defaults-model",
         default_sandboxes={"shared": sandbox},
         default_allow_workers=["child"],
     )
 
     spec = WorkerSpec(name="parent", instructions="delegate")
-    parent = create_worker(registry, spec, profile=profile)
+    parent = create_worker(registry, spec, defaults=defaults)
     child = WorkerDefinition(name="child", instructions="")
     registry.save_definition(child)
 
@@ -121,7 +121,7 @@ def test_create_worker_defaults_allow_delegation(tmp_path):
         seen_sandboxes.extend(ctx.sandbox_manager.sandboxes.keys())
         return {"worker": defn.name}
 
-    context = _parent_context(registry, parent, profile=profile)
+    context = _parent_context(registry, parent, defaults=defaults)
     call_worker(
         registry=registry,
         worker="child",

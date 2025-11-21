@@ -14,7 +14,7 @@ from llm_do.pydanticai import (
     SandboxToolset,
     ToolRule,
     WorkerContext,
-    WorkerCreationProfile,
+    WorkerCreationDefaults,
     WorkerDefinition,
     WorkerRegistry,
     WorkerSpec,
@@ -158,8 +158,8 @@ def test_sandbox_write_requires_approval(tmp_path, registry):
     assert not (sandbox_path / "note.txt").exists()
 
 
-def test_create_worker_applies_profile_defaults(registry, tmp_path):
-    profile = WorkerCreationProfile(
+def test_create_worker_applies_creation_defaults(registry, tmp_path):
+    defaults = WorkerCreationDefaults(
         default_model="gpt-4",
         default_sandboxes={
             "rw": SandboxConfig(name="rw", path=tmp_path / "rw", mode="rw"),
@@ -167,7 +167,7 @@ def test_create_worker_applies_profile_defaults(registry, tmp_path):
     )
     spec = WorkerSpec(name="beta", instructions="collect data")
 
-    created = create_worker(registry, spec, profile=profile)
+    created = create_worker(registry, spec, defaults=defaults)
 
     assert created.model == "gpt-4"
     assert "rw" in created.sandboxes
@@ -195,7 +195,7 @@ def test_call_worker_respects_allowlist(registry):
         worker=parent_def,
         sandbox_manager=sandbox_manager,
         sandbox_toolset=SandboxToolset(sandbox_manager, controller),
-        creation_profile=WorkerCreationProfile(),
+        creation_defaults=WorkerCreationDefaults(),
         effective_model="cli",
         approval_controller=controller,
     )
