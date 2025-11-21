@@ -30,10 +30,11 @@ From the example directory:
 ```bash
 cd examples/pitchdeck_eval
 llm-do pitch_orchestrator \
-  --registry workers \
   --model anthropic:claude-sonnet-4-20250514 \
   --pretty
 ```
+
+The worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
 
 What happens:
 

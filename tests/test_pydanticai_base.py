@@ -580,3 +580,42 @@ def test_prompt_file_nested_workers_directory(tmp_path):
     # Load should find prompts/ at parent level
     loaded = registry.load_definition("my_worker")
     assert loaded.instructions == "Instructions from prompts/"
+
+
+def test_workers_subdirectory_discovery(tmp_path):
+    """Test that workers can be discovered from workers/ subdirectory by name."""
+    # Create registry at project root
+    registry = WorkerRegistry(tmp_path)
+
+    # Create worker in workers/ subdirectory
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    worker_file = workers_dir / "my_worker.yaml"
+    worker_def = WorkerDefinition(name="my_worker", instructions="Do the task")
+
+    # Save directly to the workers/ subdirectory
+    registry.save_definition(worker_def, path=worker_file)
+
+    # Load by name only - should discover from workers/ subdirectory
+    loaded = registry.load_definition("my_worker")
+    assert loaded.name == "my_worker"
+    assert loaded.instructions == "Do the task"
+
+
+def test_root_level_takes_precedence_over_workers_subdir(tmp_path):
+    """Test that root-level workers take precedence over workers/ subdirectory."""
+    registry = WorkerRegistry(tmp_path)
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+
+    # Create worker at root level
+    root_worker = WorkerDefinition(name="my_worker", instructions="From root")
+    registry.save_definition(root_worker)
+
+    # Create worker in workers/ subdirectory with same name
+    subdir_worker = WorkerDefinition(name="my_worker", instructions="From workers/")
+    registry.save_definition(subdir_worker, path=workers_dir / "my_worker.yaml")
+
+    # Load should get root-level worker (precedence)
+    loaded = registry.load_definition("my_worker")
+    assert loaded.instructions == "From root"

@@ -41,7 +41,14 @@ files and standard `{% include %}` directives.
 Run from CLI:
 ```bash
 cd /path/to/project  # Registry defaults to current working directory
+
+# Load worker by name (checks root level, then workers/ subdirectory)
 llm-do evaluator \
+  --input '{"rubric": "PROCEDURE.md"}' \
+  --attachments document.pdf
+
+# Or specify full path to worker file:
+llm-do workers/evaluator.yaml \
   --input '{"rubric": "PROCEDURE.md"}' \
   --attachments document.pdf
 
@@ -51,6 +58,13 @@ llm-do evaluator \
   --input '{"rubric": "PROCEDURE.md"}' \
   --attachments document.pdf
 ```
+
+**Worker discovery convention**: When you specify a worker by name (e.g., `evaluator`),
+the registry checks:
+1. `{cwd}/evaluator.yaml` (root level)
+2. `{cwd}/workers/evaluator.yaml` (workers/ subdirectory)
+
+Root-level workers take precedence over workers/ subdirectory.
 
 Or call from another worker (recursive delegation):
 ```python
@@ -163,16 +177,18 @@ examples/pitchdeck_eval/
 **Run it:**
 ```bash
 cd examples/pitchdeck_eval
-llm-do workers/pitch_orchestrator.yaml \
+llm-do pitch_orchestrator \
   "Evaluate all pitch decks in the pipeline" \
   --model anthropic:claude-sonnet-4-20250514
 
 # If you don't want to approve writes interactively:
-llm-do workers/pitch_orchestrator.yaml \
+llm-do pitch_orchestrator \
   "Evaluate all pitch decks in the pipeline" \
   --model anthropic:claude-sonnet-4-20250514 \
   --approve-all
 ```
+
+Worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
 
 **What you'll see:**
 - Orchestrator discovers `aurora_solar.md`
