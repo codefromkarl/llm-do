@@ -6,7 +6,7 @@ architecture:
 - `workers/pitch_orchestrator.yaml` — lists decks, delegates to the evaluator,
   and writes Markdown reports.
 - `workers/pitch_evaluator.yaml` — scores a single deck and returns JSON. Loads
-  evaluation rubric via `{{file('config/PROCEDURE.md')}}` macro in its instructions.
+  evaluation rubric via `{{ file('config/PROCEDURE.md') }}` Jinja2 template in its instructions.
 - `config/` — configuration files (evaluation rubric `PROCEDURE.md`).
 - `input/` — drop Markdown (`.md`/`.txt`) versions of pitch decks here. The
   provided `aurora_solar.md` file acts as a sample input.
@@ -38,7 +38,7 @@ What happens:
 
 1. The orchestrator lists `*.md` and `*.txt` files in the `input` sandbox.
 2. For each deck, orchestrator calls `worker_call(worker="pitch_evaluator", input_data={"deck_file": ...})`.
-3. The evaluator (which has the rubric embedded via `{{file()}}` macro) reads the
+3. The evaluator (which has the rubric embedded via Jinja2 `file()` function) reads the
    deck file via `sandbox_read_text`, applies the rubric, produces JSON, and
    returns it to the orchestrator.
 4. The orchestrator converts the JSON to Markdown and saves it with
@@ -67,10 +67,10 @@ Open `evaluations/` afterwards to inspect the Markdown summaries.
 - `sandbox_write_text` for report generation
 - Tight `allow_workers` list so only `pitch_evaluator` can run from this worker
 
-`pitch_evaluator` stays focused on evaluation: it uses the `{{file()}}` macro to
-embed its rubric from `config/PROCEDURE.md`, reads decks from the input sandbox,
-and emits structured JSON. The rubric is part of the evaluator's configuration,
-not runtime data passed by the orchestrator. Because both workers inherit
+`pitch_evaluator` stays focused on evaluation: it uses Jinja2 templates with the
+`file()` function to embed its rubric from `config/PROCEDURE.md`, reads decks from
+the input sandbox, and emits structured JSON. The rubric is part of the evaluator's
+configuration, not runtime data passed by the orchestrator. Because both workers inherit
 whatever `--model` you pass on the CLI, delegation feels like a normal function
 call with shared settings.
 

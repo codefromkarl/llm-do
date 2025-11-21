@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Type, Union
 
 import yaml
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound, UndefinedError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic_ai import Agent
 from pydantic_ai.models import Model as PydanticAIModel
@@ -229,6 +230,65 @@ def _default_resolver(definition: WorkerDefinition) -> Optional[Type[BaseModel]]
 ModelLike = Union[str, PydanticAIModel]
 
 
+def _render_jinja_instructions(instructions: str, base_path: Path) -> str:
+    """Render instructions as a Jinja2 template.
+
+    Provides a `file(path)` function that loads files relative to base_path.
+    Plain text without Jinja2 syntax passes through unchanged.
+
+    Args:
+        instructions: Template string (may contain Jinja2 syntax or plain text)
+        base_path: Directory containing the worker YAML (used as base for file lookups)
+
+    Returns:
+        Rendered template string
+
+    Raises:
+        FileNotFoundError: If a referenced file doesn't exist
+        PermissionError: If a file path escapes the allowed directory
+        jinja2.TemplateError: If template syntax is invalid
+    """
+
+    # Set up Jinja2 environment with FileSystemLoader from parent directory
+    # This allows loading files like config/PROCEDURE.md when worker is in workers/
+    env = Environment(
+        loader=FileSystemLoader(base_path.parent),
+        autoescape=False,  # Don't escape - we want raw text
+        keep_trailing_newline=True,
+    )
+
+    # Add custom file() function
+    def load_file(path_str: str) -> str:
+        """Load a file relative to the worker's parent directory."""
+        file_path = (base_path.parent / path_str).resolve()
+
+        # Security: ensure resolved path doesn't escape too far
+        # Allow files in base_path.parent or its children
+        try:
+            file_path.relative_to(base_path.parent)
+        except ValueError:
+            raise PermissionError(
+                f"File path escapes allowed directory: {path_str}"
+            )
+
+        if not file_path.exists():
+            raise FileNotFoundError(
+                f"File not found: {path_str}"
+            )
+
+        return file_path.read_text(encoding="utf-8")
+
+    # Make file() available in templates
+    env.globals["file"] = load_file
+
+    # Render the template
+    try:
+        template = env.from_string(instructions)
+        return template.render()
+    except (TemplateNotFound, UndefinedError) as exc:
+        raise ValueError(f"Template error: {exc}") from exc
+
+
 class WorkerRegistry:
     """File-backed registry for worker artifacts."""
 
@@ -263,6 +323,11 @@ class WorkerRegistry:
         if not path.exists():
             raise FileNotFoundError(f"Worker definition not found: {name}")
         data = self._load_raw(path)
+
+        # Render instructions as Jinja2 template (supports file() function and {% include %})
+        if "instructions" in data and isinstance(data["instructions"], str):
+            data["instructions"] = _render_jinja_instructions(data["instructions"], path.parent)
+
         try:
             return WorkerDefinition.model_validate(data)
         except ValidationError as exc:

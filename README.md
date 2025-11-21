@@ -172,7 +172,7 @@ llm-do workers/pitch_orchestrator.yaml \
 - Adjust worker behavior: Edit `workers/pitch_evaluator.yaml` instructions
 
 **Key features demonstrated:**
-- **File inclusion macro**: Evaluator loads rubric via `{{file('config/PROCEDURE.md')}}` in instructions
+- **Jinja2 templates**: Evaluator loads rubric via `{{ file('config/PROCEDURE.md') }}` in instructions (supports full Jinja2 syntax)
 - **Sandboxed file access**: Read-only `input/`, writable `evaluations/`
 - **Worker delegation**: Orchestrator calls evaluator with `allow_workers` list
 - **Model inheritance**: Both workers use CLI-specified model

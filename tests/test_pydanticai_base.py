@@ -324,3 +324,103 @@ def test_strict_mode_callback_rejects(tmp_path, registry):
 
     # Tool did not execute
     assert not (sandbox_path / "note.txt").exists()
+
+
+def test_jinja_file_function(tmp_path):
+    """Test that Jinja2 file() function loads files correctly."""
+    # Create registry and support file
+    registry_root = tmp_path / "workers"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+
+    # Create a config file
+    rubric_file = config_dir / "rubric.md"
+    rubric_file.write_text("# Evaluation Rubric\n\nScore from 1-5.")
+
+    # Create worker definition with Jinja2 file() function
+    registry = WorkerRegistry(registry_root)
+    worker_def = WorkerDefinition(
+        name="evaluator",
+        instructions="Evaluate using this rubric:\n\n{{ file('config/rubric.md') }}\n\nReturn scores.",
+    )
+    registry.save_definition(worker_def)
+
+    # Load the worker - Jinja2 should render the template
+    loaded = registry.load_definition("evaluator")
+
+    assert "{{ file(" not in loaded.instructions
+    assert "# Evaluation Rubric" in loaded.instructions
+    assert "Score from 1-5." in loaded.instructions
+    assert "Return scores." in loaded.instructions
+
+
+def test_jinja_include_directive(tmp_path):
+    """Test that standard Jinja2 {% include %} directive works."""
+    registry_root = tmp_path / "workers"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+
+    # Create a config file
+    procedure_file = config_dir / "procedure.txt"
+    procedure_file.write_text("Step 1: Analyze\nStep 2: Score")
+
+    # Create worker with {% include %} directive
+    registry = WorkerRegistry(registry_root)
+    worker_def = WorkerDefinition(
+        name="worker",
+        instructions="Follow this procedure:\n{% include 'config/procedure.txt' %}",
+    )
+    registry.save_definition(worker_def)
+
+    loaded = registry.load_definition("worker")
+
+    assert "{% include" not in loaded.instructions
+    assert "Step 1: Analyze" in loaded.instructions
+    assert "Step 2: Score" in loaded.instructions
+
+
+def test_jinja_plain_text_passthrough(tmp_path):
+    """Test that plain text without Jinja2 syntax passes through unchanged."""
+    registry_root = tmp_path / "workers"
+    registry = WorkerRegistry(registry_root)
+
+    plain_instructions = "Just evaluate the document. No templates here."
+    worker_def = WorkerDefinition(
+        name="plain",
+        instructions=plain_instructions,
+    )
+    registry.save_definition(worker_def)
+
+    loaded = registry.load_definition("plain")
+    assert loaded.instructions == plain_instructions
+
+
+def test_jinja_file_not_found(tmp_path):
+    """Test that missing file raises FileNotFoundError."""
+    registry_root = tmp_path / "workers"
+    registry = WorkerRegistry(registry_root)
+
+    worker_def = WorkerDefinition(
+        name="broken",
+        instructions="Use this: {{ file('missing.md') }}",
+    )
+    registry.save_definition(worker_def)
+
+    with pytest.raises(FileNotFoundError, match="File not found"):
+        registry.load_definition("broken")
+
+
+def test_jinja_path_escape_prevention(tmp_path):
+    """Test that file() function prevents path escapes."""
+    registry_root = tmp_path / "workers"
+    registry = WorkerRegistry(registry_root)
+
+    # Try to escape to parent's parent
+    worker_def = WorkerDefinition(
+        name="malicious",
+        instructions="{{ file('../../etc/passwd') }}",
+    )
+    registry.save_definition(worker_def)
+
+    with pytest.raises(PermissionError, match="path escapes allowed directory"):
+        registry.load_definition("malicious")

@@ -9,7 +9,7 @@ instructions: |
   - `sandbox_read_text("input", path)` to read the deck file.
 
   Evaluation rubric:
-  {{file('config/PROCEDURE.md')}}
+  {{ file('config/PROCEDURE.md') }}
 
   Requirements:
   1. Read the deck file and understand the business, traction, team, and market.
