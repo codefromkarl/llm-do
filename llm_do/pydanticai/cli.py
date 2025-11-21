@@ -68,7 +68,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--model",
         dest="cli_model",
         default=None,
-        help="Override the effective model for this run",
+        help="Model to use (e.g., anthropic:claude-sonnet-4-20250514, openai:gpt-4o). Required if worker has no model.",
     )
     parser.add_argument(
         "--creation-defaults",

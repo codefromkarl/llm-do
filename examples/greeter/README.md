@@ -25,7 +25,8 @@ export GOOGLE_API_KEY="..."
 ### Basic greeting (simple interface)
 
 ```bash
-llm-do examples/greeter.yaml "Tell me a joke"
+llm-do examples/greeter.yaml "Tell me a joke" \
+  --model anthropic:claude-sonnet-4-20250514
 ```
 
 The CLI automatically:
@@ -33,7 +34,9 @@ The CLI automatically:
 - Pretty-prints output by default
 - Accepts plain text messages
 
-### With different models
+**Note:** The `--model` flag is required since this worker doesn't specify a model in its definition.
+
+### Using different models
 
 ```bash
 # Override with a different Claude model
@@ -69,10 +72,13 @@ llm-do examples/greeter.yaml \
 The worker is defined in `../greeter.yaml`:
 
 - **name**: greeter
-- **model**: anthropic:claude-sonnet-4-20250514 (configurable via `--model` flag)
+- **model**: None (must be specified via `--model` flag)
 - **instructions**: Simple, friendly conversational style
 - **no sandboxes**: This worker doesn't need file access
 - **no approval rules**: Safe for all operations (no file writes, no delegations)
+
+Workers can optionally specify a model in their YAML definition. This example
+leaves it unspecified to demonstrate the `--model` flag.
 
 ## Output
 
