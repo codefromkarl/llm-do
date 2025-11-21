@@ -425,12 +425,7 @@ def _format_user_prompt(user_input: Any) -> str:
 
     if isinstance(user_input, str):
         return user_input
-    if isinstance(user_input, (bytes, bytearray)):
-        return user_input.decode("utf-8", errors="replace")
-    try:
-        return json.dumps(user_input, indent=2, sort_keys=True, default=str)
-    except (TypeError, ValueError):
-        return str(user_input)
+    return json.dumps(user_input, indent=2, sort_keys=True)
 
 
 def _register_worker_tools(agent: Agent) -> None:
