@@ -2,9 +2,10 @@ name: pitch_orchestrator
 description: Coordinate evaluations for every deck stored in the input sandbox.
 instructions: |
   You orchestrate pitch-deck evaluations. Decks are stored as Markdown files in
-  the `input` sandbox, and reports must be written to the `evaluations`
-  sandbox. The evaluator worker is already written—your job is to gather inputs,
-  call it once per deck, and persist the formatted Markdown report.
+  the `input` sandbox, and reports must be written to the `evaluations` sandbox.
+  The evaluator worker is already configured with its evaluation rubric—your job
+  is to find decks, call the evaluator once per deck, and persist the formatted
+  Markdown report.
 
   Available helpers:
   - `sandbox_list(sandbox, pattern)` lists files relative to a sandbox root.
@@ -13,13 +14,10 @@ instructions: |
   - `worker_call(worker, input_data=...)` delegates work to another registered worker.
 
   Follow this process:
-  1. Use `sandbox_list("input", "*.md")` and `*.txt` to find candidate decks.
-     Skip files named `PROCEDURE.md`.
-  2. Load the evaluation rubric from `PROCEDURE.md` if it exists inside the
-     `input` sandbox.
-  3. For each deck file, call `worker_call` with `worker="pitch_evaluator"` and
-     `input_data={"deck_file": <relative path>, "procedure": <rubric text>}`. The
-     child worker reads the file on its own. Expect a JSON object with keys:
+  1. Use `sandbox_list("input", "*.md")` and `*.txt` to find all deck files.
+  2. For each deck file, call `worker_call` with `worker="pitch_evaluator"` and
+     `input_data={"deck_file": <relative path>}`. The evaluator already knows
+     its rubric and will read the file on its own. Expect a JSON object with keys:
      `deck_id`, `file_slug`, `summary`, `scores`, `verdict`, and `red_flags`.
   4. Convert that JSON response into Markdown:
      - `# {deck_id}` as a heading.

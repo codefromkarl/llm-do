@@ -132,16 +132,17 @@ examples/pitchdeck_eval/
   workers/
     pitch_orchestrator.yaml  # Coordinates evaluation workflow
     pitch_evaluator.yaml     # Scores individual decks
+  config/
+    PROCEDURE.md            # Evaluation rubric (configuration)
   input/
-    PROCEDURE.md            # Evaluation rubric
-    aurora_solar.md         # Sample pitch deck
+    aurora_solar.md         # Sample pitch deck (pure input data)
   evaluations/              # Output directory (reports written here)
 ```
 
 **How it works:**
 1. **Orchestrator** lists `.md` files in `input/` sandbox (read-only)
 2. For each deck, **orchestrator** calls **evaluator** worker via `worker_call()`
-3. **Evaluator** reads deck file, applies rubric, returns structured JSON
+3. **Evaluator** reads deck file, applies its configured rubric (loaded via `{{file()}}` macro), returns structured JSON
 4. **Orchestrator** converts JSON to Markdown report
 5. **Orchestrator** writes report to `evaluations/` sandbox (writable)
 
@@ -167,10 +168,11 @@ llm-do workers/pitch_orchestrator.yaml \
 
 **Try it yourself:**
 - Add more pitch decks: Drop `.md` or `.txt` files into `input/`
-- Customize rubric: Edit `input/PROCEDURE.md` to change scoring dimensions
+- Customize rubric: Edit `config/PROCEDURE.md` to change scoring dimensions
 - Adjust worker behavior: Edit `workers/pitch_evaluator.yaml` instructions
 
 **Key features demonstrated:**
+- **File inclusion macro**: Evaluator loads rubric via `{{file('config/PROCEDURE.md')}}` in instructions
 - **Sandboxed file access**: Read-only `input/`, writable `evaluations/`
 - **Worker delegation**: Orchestrator calls evaluator with `allow_workers` list
 - **Model inheritance**: Both workers use CLI-specified model
