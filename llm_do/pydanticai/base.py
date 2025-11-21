@@ -184,7 +184,6 @@ class WorkerRunResult(BaseModel):
 
     output: Any
     deferred_requests: List[DeferredToolRequest] = Field(default_factory=list)
-    usage: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +585,7 @@ def run_worker(
     else:
         output = raw_output
 
-    return WorkerRunResult(output=output, deferred_requests=deferred, usage={})
+    return WorkerRunResult(output=output, deferred_requests=deferred)
 
 
 __all__: Iterable[str] = [
