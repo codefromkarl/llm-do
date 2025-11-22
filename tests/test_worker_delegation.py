@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -41,6 +42,26 @@ def _parent_context(registry, worker, defaults=None):
         effective_model="cli-model",
         approval_controller=controller,
     )
+
+
+def _parent_with_sandbox(tmp_path, *, attachment_policy: AttachmentPolicy | None = None):
+    sandbox_root = tmp_path / "input"
+    sandbox_root.mkdir()
+    parent = WorkerDefinition(
+        name="parent",
+        instructions="",
+        allow_workers=["child"],
+        sandboxes={
+            "input": SandboxConfig(
+                name="input",
+                path=sandbox_root,
+                mode="ro",
+                allowed_suffixes=[".pdf", ".txt"],
+            )
+        },
+        attachment_policy=attachment_policy or AttachmentPolicy(),
+    )
+    return parent, sandbox_root
 
 
 def test_call_worker_forwards_attachments(tmp_path):
@@ -162,10 +183,10 @@ def test_worker_call_tool_respects_approval(monkeypatch, tmp_path):
 
 def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
     registry = _registry(tmp_path)
-    parent = WorkerDefinition(name="parent", instructions="", allow_workers=["child"])
+    parent, sandbox_root = _parent_with_sandbox(tmp_path)
     registry.save_definition(parent)
     context = _parent_context(registry, parent)
-    attachment = tmp_path / "note.txt"
+    attachment = sandbox_root / "deck.pdf"
     attachment.write_text("memo", encoding="utf-8")
 
     captured = {}
@@ -180,11 +201,123 @@ def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
         context,
         worker="child",
         input_data={"task": "demo"},
-        attachments=[str(attachment)],
+        attachments=["input/deck.pdf"],
     )
 
     assert result == {"status": "ok"}
     assert captured["attachments"] == [attachment.resolve()]
+
+
+def test_worker_call_tool_parent_policy_suffix(tmp_path):
+    registry = _registry(tmp_path)
+    policy = AttachmentPolicy(allowed_suffixes=[".txt"])
+    parent, sandbox_root = _parent_with_sandbox(tmp_path, attachment_policy=policy)
+    registry.save_definition(parent)
+    context = _parent_context(registry, parent)
+
+    pdf_path = sandbox_root / "deck.pdf"
+    pdf_path.write_text("memo", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _worker_call_tool(
+            context,
+            worker="child",
+            input_data={"task": "demo"},
+            attachments=["input/deck.pdf"],
+        )
+
+
+def test_worker_call_tool_parent_policy_counts(tmp_path):
+    registry = _registry(tmp_path)
+    policy = AttachmentPolicy(max_attachments=1)
+    parent, sandbox_root = _parent_with_sandbox(tmp_path, attachment_policy=policy)
+    registry.save_definition(parent)
+    context = _parent_context(registry, parent)
+
+    for idx in range(2):
+        path = sandbox_root / f"deck-{idx}.pdf"
+        path.write_text("memo", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _worker_call_tool(
+            context,
+            worker="child",
+            input_data={"task": "demo"},
+            attachments=["input/deck-0.pdf", "input/deck-1.pdf"],
+        )
+
+
+def test_worker_call_tool_parent_policy_bytes(tmp_path):
+    registry = _registry(tmp_path)
+    policy = AttachmentPolicy(max_total_bytes=4)
+    parent, sandbox_root = _parent_with_sandbox(tmp_path, attachment_policy=policy)
+    registry.save_definition(parent)
+    context = _parent_context(registry, parent)
+
+    path = sandbox_root / "deck.pdf"
+    path.write_text("12345", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _worker_call_tool(
+            context,
+            worker="child",
+            input_data={"task": "demo"},
+            attachments=["input/deck.pdf"],
+        )
+
+
+def test_worker_call_tool_rejects_path_escape(tmp_path):
+    registry = _registry(tmp_path)
+    parent, sandbox_root = _parent_with_sandbox(tmp_path)
+    registry.save_definition(parent)
+    context = _parent_context(registry, parent)
+    outside = tmp_path / "secret.pdf"
+    outside.write_text("memo", encoding="utf-8")
+
+    with pytest.raises(PermissionError):
+        _worker_call_tool(
+            context,
+            worker="child",
+            input_data={"task": "demo"},
+            attachments=["input/../secret.pdf"],
+        )
+
+
+def test_worker_call_tool_includes_attachment_metadata(monkeypatch, tmp_path):
+    registry = _registry(tmp_path)
+    parent, sandbox_root = _parent_with_sandbox(tmp_path)
+    registry.save_definition(parent)
+    context = _parent_context(registry, parent)
+    attachment = sandbox_root / "deck.pdf"
+    payload_bytes = "memo".encode("utf-8")
+    attachment.write_bytes(payload_bytes)
+
+    captured_payload: dict[str, Any] = {}
+
+    def fake_call_worker(**_):
+        return WorkerRunResult(output={"status": "ok"})
+
+    def fake_maybe_run(tool_name, payload, func):
+        captured_payload["tool"] = tool_name
+        captured_payload["payload"] = payload
+        return func()
+
+    context.approval_controller.maybe_run = fake_maybe_run
+    monkeypatch.setattr("llm_do.base.call_worker", fake_call_worker)
+
+    result = _worker_call_tool(
+        context,
+        worker="child",
+        input_data={"task": "demo"},
+        attachments=["input/deck.pdf"],
+    )
+
+    assert result == {"status": "ok"}
+    assert captured_payload["tool"] == "worker.call"
+    attachment_info = captured_payload["payload"]["attachments"][0]
+    assert attachment_info["sandbox"] == "input"
+    assert attachment_info["path"] == "deck.pdf"
+    assert attachment_info["bytes"] == len(payload_bytes)
 
 
 def test_worker_create_tool_persists_definition(tmp_path):

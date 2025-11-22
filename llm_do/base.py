@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Type, Union
 
 import yaml
@@ -212,7 +212,7 @@ class WorkerRegistry:
 
         prompts_dir = project_root / "prompts"
 
-        if "instructions" not in data or data["instructions"] is None:
+        if "instructions" not in data or data.get("instructions") is None:
             # No inline instructions - discover from prompts/ directory
             if prompts_dir.exists():
                 worker_name = data.get("name", name)
@@ -346,6 +346,70 @@ class WorkerContext:
     attachments: List[Path] = field(default_factory=list)
     message_callback: Optional[MessageCallback] = None
 
+    def validate_attachments(
+        self, attachment_specs: Optional[Sequence[Union[str, Path]]]
+    ) -> tuple[List[Path], List[Dict[str, Any]]]:
+        """Resolve attachment specs to sandboxed files and enforce policy limits."""
+
+        if not attachment_specs:
+            return ([], [])
+
+        resolved: List[Path] = []
+        metadata: List[Dict[str, Any]] = []
+        for spec in attachment_specs:
+            path, info = self._resolve_attachment_spec(spec)
+            resolved.append(path)
+            metadata.append(info)
+
+        # Reuse the caller's attachment policy to keep delegation within limits
+        self.worker.attachment_policy.validate_paths(resolved)
+        return (resolved, metadata)
+
+    def _resolve_attachment_spec(
+        self, spec: Union[str, Path]
+    ) -> tuple[Path, Dict[str, Any]]:
+        value = str(spec).strip()
+        if not value:
+            raise ValueError("Attachment path cannot be empty")
+
+        normalized = value.replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith("~"):
+            raise PermissionError("Attachments must reference a sandbox, not an absolute path")
+
+        # Support "sandbox:path" style by converting to sandbox/relative.
+        if ":" in normalized:
+            prefix, suffix = normalized.split(":", 1)
+            if prefix in self.sandbox_manager.sandboxes:
+                normalized = f"{prefix}/{suffix.lstrip('/')}"
+
+        path = PurePosixPath(normalized)
+        parts = path.parts
+        if not parts:
+            raise ValueError("Attachment path must include a sandbox and file name")
+
+        sandbox_name = parts[0]
+        if sandbox_name in {".", ".."}:
+            raise PermissionError("Attachments must reference a sandbox name")
+
+        if sandbox_name not in self.sandbox_manager.sandboxes:
+            raise KeyError(f"Unknown sandbox '{sandbox_name}' for attachment '{value}'")
+
+        relative_parts = parts[1:]
+        if not relative_parts:
+            raise ValueError("Attachment path must include a file inside the sandbox")
+
+        relative_path = PurePosixPath(*relative_parts).as_posix()
+        sandbox_root = self.sandbox_manager.sandboxes[sandbox_name]
+        target = sandbox_root.resolve(relative_path)
+        if not target.exists():
+            raise FileNotFoundError(f"Attachment not found: {value}")
+        if not target.is_file():
+            raise IsADirectoryError(f"Attachment must be a file: {value}")
+
+        size = target.stat().st_size
+        info = {"sandbox": sandbox_name, "path": relative_path, "bytes": size}
+        return (target, info)
+
 
 AgentRunner = Callable[[WorkerDefinition, Any, WorkerContext, Optional[Type[BaseModel]]], Any]
 
@@ -430,20 +494,30 @@ def _worker_call_tool(
     input_data: Any = None,
     attachments: Optional[List[str]] = None,
 ) -> Any:
+    resolved_attachments: List[Path]
+    attachment_metadata: List[Dict[str, Any]]
+    if attachments:
+        resolved_attachments, attachment_metadata = ctx.validate_attachments(attachments)
+    else:
+        resolved_attachments, attachment_metadata = ([], [])
+
     def _invoke() -> Any:
-        resolved = [Path(path).expanduser().resolve() for path in attachments or []]
         result = call_worker(
             registry=ctx.registry,
             worker=worker,
             input_data=input_data,
             caller_context=ctx,
-            attachments=resolved or None,
+            attachments=resolved_attachments or None,
         )
         return result.output
 
+    payload: Dict[str, Any] = {"worker": worker}
+    if attachment_metadata:
+        payload["attachments"] = attachment_metadata
+
     return ctx.approval_controller.maybe_run(
         "worker.call",
-        {"worker": worker},
+        payload,
         _invoke,
     )
 

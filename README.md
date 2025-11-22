@@ -140,7 +140,10 @@ focuses purely on analysis. This separation makes each worker:
 Instead of sharing sandboxes or passing file paths, the orchestrator sends PDFs as
 attachments via `worker_call(attachments=["input/deck.pdf"])`. The evaluator receives
 the PDF directly and uses LLM vision to read it natively—no text extraction, no
-preprocessing. This pattern works for any file type the LLM can process.
+preprocessing. This pattern works for any file type the LLM can process, and the
+attachment path (`input/deck.pdf`) is resolved inside the orchestrator's `input`
+sandbox and checked against its attachment policy so it cannot escape allowed
+roots or send unexpected file types.
 
 **Configuration as Code**
 

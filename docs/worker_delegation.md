@@ -68,7 +68,7 @@ from llm_do.pydanticai import call_worker
 result = call_worker(
     worker_name="evaluator",
     input_data={"rubric": "Evaluate this pitch deck thoroughly"},
-    attachments=["deck.pdf"],
+    attachments=["input/deck.pdf"],
     model="claude-sonnet-4",  # Optional override
     registry=worker_registry,
     approval_callback=approve_all_callback,
@@ -95,6 +95,8 @@ def worker_call(
 ```
 
 This enforces allowlists, file validation, sandbox security, and approval rules. Workers can be locked (prevent overwrites) to ensure orchestrators always use vetted definitions.
+
+**Attachment resolution.** When a worker passes `attachments` to `worker_call`, each entry must reference one of the caller's sandboxes (for example `attachments=["input/deck.pdf"]`). The runtime resolves the path inside that sandbox, blocks escape attempts, and re-applies the caller's `attachment_policy` (count, total bytes, suffix allow/deny) before forwarding the files to the callee. This keeps delegated attachments confined to data the caller already has permission to touch.
 
 ### Model Selection
 
@@ -136,6 +138,8 @@ When a tool with `approval_required: true` is called, the runtime gates it throu
 - Context about why
 
 They can then approve, reject, or modify before execution. Session approvals remember approvals for identical calls during the same run.
+
+When `worker_call` sends attachments, the approval payload includes each sandbox-relative path and file size so the operator understands exactly which files will be shared with the delegated worker.
 
 ## Why Recursion Matters
 
