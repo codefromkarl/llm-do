@@ -17,6 +17,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 - Run full test suite before committing: `pytest`
 - Tests use mock models, no real API calls
 - After changing templates, test with `llm -t <template>`
+- **Testing with real models**: Use `anthropic:claude-haiku-4-5` for fast, cost-effective testing
 - Style: black, 4 spaces, snake_case/PascalCase
 - **No backwards compatibility** — new project, no external users yet; breaking changes are fine if they improve design
 - **Balance simplicity with good design** — aim for clean architecture, but don't over-engineer; delete complexity when possible

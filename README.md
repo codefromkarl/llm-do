@@ -49,13 +49,13 @@ cd examples/pitchdeck_eval  # Registry defaults to current working directory
 llm-do pitch_evaluator \
   --input '{"deck_name": "Aurora Solar"}' \
   --attachments input/aurora-solar.pdf \
-  --model anthropic:claude-sonnet-4-20250514
+  --model anthropic:claude-sonnet-4-5
 
 # Or specify full path to worker file:
 llm-do workers/pitch_evaluator.yaml \
   --input '{"deck_name": "Aurora Solar"}' \
   --attachments input/aurora-solar.pdf \
-  --model anthropic:claude-sonnet-4-20250514
+  --model anthropic:claude-sonnet-4-5
 ```
 
 **Worker discovery convention**: When you specify a worker by name (e.g., `pitch_evaluator`),
@@ -165,7 +165,7 @@ needed.
 cd examples/pitchdeck_eval
 llm-do pitch_orchestrator \
   "Evaluate all pitch decks" \
-  --model anthropic:claude-sonnet-4-20250514 \
+  --model anthropic:claude-sonnet-4-5 \
   --approve-all
 ```
 
@@ -193,7 +193,7 @@ The worker doesn't specify a model, so you provide one at runtime via `--model`.
 ```bash
 cd examples
 llm-do greeter "Tell me a joke" \
-  --model anthropic:claude-sonnet-4-20250514
+  --model anthropic:claude-haiku-4-5
 ```
 
 For more details, see the [greeter README](examples/README.md).
