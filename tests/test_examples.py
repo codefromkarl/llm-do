@@ -38,6 +38,15 @@ from llm_do import (
 )
 
 
+pytestmark = pytest.mark.examples
+
+
+@pytest.fixture(autouse=True)
+def _skip_examples_unless_requested(pytestconfig):
+    if not pytestconfig.getoption("--run-example-tests"):
+        pytest.skip("example integration tests require --run-example-tests")
+
+
 class ToolCallingModel(Model):
     """Mock model that makes predefined tool calls.
 

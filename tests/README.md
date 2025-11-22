@@ -10,6 +10,20 @@ This guide documents the testing strategies and patterns used in llm-do. The cod
 | **Custom agent_runner** | Test orchestration logic | `run_worker(agent_runner=custom_runner, ...)` |
 | **Real model (integration)** | Verify critical end-to-end flows | Keep minimal |
 
+### Example Integration Tests
+
+`tests/test_examples.py` exercises the example projects end-to-end (copying
+directories, writing sandbox files, etc.). These tests are opt-in because they
+take noticeably longer and touch the filesystem more aggressively.
+
+Run them explicitly when needed:
+
+```bash
+pytest tests/test_examples.py --run-example-tests
+```
+
+Without the flag the entire module is skipped.
+
 ## Using PydanticAI's TestModel
 
 ### When to Use
