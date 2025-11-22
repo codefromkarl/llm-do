@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from rich.console import Console as RichConsole
 
 from llm_do.pydanticai import WorkerDefinition, WorkerRegistry, WorkerRunResult
 from llm_do.pydanticai.cli import main
@@ -133,42 +134,55 @@ def test_cli_passes_attachments(tmp_path, monkeypatch):
         ]
 
 
-def test_cli_pretty_prints_by_default(tmp_path, monkeypatch, capsys):
-    """Test that output is pretty-printed by default."""
+def test_cli_displays_rich_output_by_default(tmp_path, monkeypatch):
+    """Default mode renders the rich message exchange and final panel."""
     registry = WorkerRegistry(tmp_path)
     registry.save_definition(WorkerDefinition(name="worker", instructions="demo"))
 
     monkeypatch.chdir(tmp_path)
+
+    recorded_console: dict[str, RichConsole] = {}
+
+    def fake_console(*_args, **_kwargs):
+        console = RichConsole(
+            force_terminal=False,
+            color_system=None,
+            record=True,
+            width=80,
+        )
+        recorded_console["instance"] = console
+        return console
+
+    monkeypatch.setattr("llm_do.pydanticai.cli.Console", fake_console)
 
     with patch("llm_do.pydanticai.cli.run_worker") as mock_run:
         mock_run.return_value = WorkerRunResult(output={"key": "value", "nested": {"a": 1}})
 
-        main(["worker", "test"])
+        assert main(["worker", "test"]) == 0
 
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-
-        # Verify it's valid JSON
-        assert output["output"] == {"key": "value", "nested": {"a": 1}}
-
-        # Verify it has indentation (pretty printed)
-        assert "  " in captured.out  # Has indentation
-        assert "\n" in captured.out  # Has newlines
+    assert "instance" in recorded_console
+    rendered = recorded_console["instance"].export_text()
+    assert "Message Exchange" in rendered
+    assert "Final Output" in rendered
+    assert '"key": "value"' in rendered
 
 
-def test_cli_respects_no_pretty_flag(tmp_path, monkeypatch, capsys):
-    """Test that --no-pretty disables pretty printing."""
+def test_cli_json_mode_outputs_structured_result(tmp_path, monkeypatch, capsys):
+    """--json flag should return serialized WorkerRunResult."""
     registry = WorkerRegistry(tmp_path)
     registry.save_definition(WorkerDefinition(name="worker", instructions="demo"))
 
     monkeypatch.chdir(tmp_path)
 
     with patch("llm_do.pydanticai.cli.run_worker") as mock_run:
-        mock_run.return_value = WorkerRunResult(output={"key": "value"})
+        mock_run.return_value = WorkerRunResult(
+            output={"key": "value"},
+            messages=[{"role": "user", "content": "hello"}],
+        )
 
-        main(["worker", "test", "--no-pretty"])
+        assert main(["worker", "test", "--json"]) == 0
 
-        captured = capsys.readouterr()
-        # Should be compact JSON on one line
-        assert captured.out.count("\n") == 1  # Only trailing newline
-        assert "  " not in captured.out  # No indentation
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["output"] == {"key": "value"}
+    assert payload["messages"] == [{"role": "user", "content": "hello"}]

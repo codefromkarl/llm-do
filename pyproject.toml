@@ -25,6 +25,7 @@ dependencies = [
     "PyYAML",
     "jinja2>=3.0",
     "rich>=13.0",
+    "pytest>=9.0.1",
 ]
 
 [project.scripts]
