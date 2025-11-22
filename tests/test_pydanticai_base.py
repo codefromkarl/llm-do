@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -120,6 +121,32 @@ def test_run_worker_applies_model_inheritance(registry):
     assert result.output.worker == "alpha"
 
 
+def test_run_worker_message_callback_invoked(registry):
+    definition = WorkerDefinition(name="alpha", instructions="")
+    registry.save_definition(definition)
+
+    seen: list[Any] = []
+
+    def callback(events):
+        seen.extend(events)
+
+    def runner(defn, input_data, ctx, output_model):
+        assert ctx.message_callback is callback
+        ctx.message_callback([{"worker": defn.name, "event": "chunk"}])
+        return ("done", [])
+
+    run_worker(
+        registry=registry,
+        worker="alpha",
+        input_data="hi",
+        cli_model="mock",
+        agent_runner=runner,
+        message_callback=callback,
+    )
+
+    assert seen == [{"worker": "alpha", "event": "chunk"}]
+
+
 def test_sandbox_write_requires_approval(tmp_path, registry):
     sandbox_path = tmp_path / "out"
     sandbox_cfg = SandboxConfig(
@@ -210,6 +237,50 @@ def test_call_worker_respects_allowlist(registry):
 
     assert result.output["worker"] == "child"
     assert result.output["model"] == "cli"
+
+
+def test_call_worker_propagates_message_callback(registry):
+    parent_def = WorkerDefinition(
+        name="parent",
+        instructions="",
+        allow_workers=["child"],
+    )
+    child_def = WorkerDefinition(name="child", instructions="")
+    registry.save_definition(parent_def)
+    registry.save_definition(child_def)
+
+    events: list[Any] = []
+
+    def callback(payload):
+        events.extend(payload)
+
+    def runner(defn, input_data, ctx, output_model):
+        assert ctx.message_callback is callback
+        ctx.message_callback([{"worker": defn.name, "event": "child-event"}])
+        return ("done", [])
+
+    controller = ApprovalController(parent_def.tool_rules)
+    sandbox_manager = SandboxManager(parent_def.sandboxes)
+    parent_context = WorkerContext(
+        registry=registry,
+        worker=parent_def,
+        sandbox_manager=sandbox_manager,
+        sandbox_toolset=SandboxToolset(sandbox_manager, controller),
+        creation_defaults=WorkerCreationDefaults(),
+        effective_model="cli",
+        approval_controller=controller,
+        message_callback=callback,
+    )
+
+    call_worker(
+        registry=registry,
+        worker="child",
+        input_data={"from": "parent"},
+        caller_context=parent_context,
+        agent_runner=runner,
+    )
+
+    assert events == [{"worker": "child", "event": "child-event"}]
 
 
 def test_default_agent_runner_uses_pydantic_ai(registry):
@@ -602,5 +673,3 @@ def test_workers_subdirectory_discovery(tmp_path):
     loaded = registry.load_definition("my_worker")
     assert loaded.name == "my_worker"
     assert loaded.instructions == "Do the task"
-
-

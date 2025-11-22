@@ -424,6 +424,9 @@ class ApprovalController:
 # ---------------------------------------------------------------------------
 
 
+MessageCallback = Callable[[List[Any]], None]
+
+
 @dataclass
 class WorkerContext:
     registry: WorkerRegistry
@@ -434,6 +437,7 @@ class WorkerContext:
     effective_model: Optional[ModelLike]
     approval_controller: ApprovalController
     attachments: List[Path] = field(default_factory=list)
+    message_callback: Optional[MessageCallback] = None
 
 
 AgentRunner = Callable[[WorkerDefinition, Any, WorkerContext, Optional[Type[BaseModel]]], Any]
@@ -579,6 +583,12 @@ def _default_agent_runner(
 ) -> tuple[Any, List[Any]]:
     """Execute a worker via a PydanticAI agent using the worker context.
 
+    Args:
+        definition: Worker definition with instructions and configuration
+        user_input: Input data for the worker
+        context: Worker execution context with tools and dependencies (includes message_callback)
+        output_model: Optional Pydantic model for structured output
+
     Returns:
         Tuple of (output, messages) where messages is the list of all messages
         exchanged with the LLM during execution.
@@ -617,9 +627,23 @@ def _default_agent_runner(
         # Just text, no attachments
         prompt = prompt_text
 
-    run_result = agent.run_sync(prompt, deps=context)
+    event_handler = None
+    if context.message_callback:
+        async def _stream_handler(
+            run_ctx: RunContext[WorkerContext], event_stream
+        ) -> None:  # pragma: no cover - exercised indirectly via integration tests
+            async for event in event_stream:
+                context.message_callback([{"worker": definition.name, "event": event}])
 
-    # Extract messages from the result
+        event_handler = _stream_handler
+
+    run_result = agent.run_sync(
+        prompt,
+        deps=context,
+        event_stream_handler=event_handler,
+    )
+
+    # Extract all messages from the result
     messages = run_result.all_messages() if hasattr(run_result, 'all_messages') else []
 
     return (run_result.output, messages)
@@ -635,7 +659,7 @@ def call_worker(
     caller_context: WorkerContext,
     attachments: Optional[List[Path]] = None,
     agent_runner: AgentRunner = _default_agent_runner,
-) -> WorkerRunResult:
+    ) -> WorkerRunResult:
     allowed = caller_context.worker.allow_workers
     if allowed and worker not in allowed:
         raise PermissionError(f"Delegation to '{worker}' is not allowed")
@@ -647,6 +671,7 @@ def call_worker(
         attachments=attachments,
         creation_defaults=caller_context.creation_defaults,
         agent_runner=agent_runner,
+        message_callback=caller_context.message_callback,
     )
 
 
@@ -677,6 +702,7 @@ def run_worker(
     creation_defaults: Optional[WorkerCreationDefaults] = None,
     agent_runner: AgentRunner = _default_agent_runner,
     approval_callback: ApprovalCallback = _auto_approve_callback,
+    message_callback: Optional[MessageCallback] = None,
 ) -> WorkerRunResult:
     definition = registry.load_definition(worker)
 
@@ -701,6 +727,7 @@ def run_worker(
         effective_model=effective_model,
         attachments=attachment_list,
         approval_controller=approvals,
+        message_callback=message_callback,
     )
 
     output_model = registry.resolve_output_schema(definition)

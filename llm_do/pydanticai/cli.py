@@ -13,14 +13,23 @@ from typing import Any, Optional
 
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, UserError
 from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    PartDeltaEvent,
+    PartEndEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
-    TextPart,
     UserPromptPart,
     SystemPromptPart,
+    RetryPromptPart,
 )
 from rich.console import Console
 from rich.panel import Panel
@@ -135,6 +144,141 @@ def _display_messages(messages: list[ModelMessage], console: Console) -> None:
                         border_style="blue",
                     ))
 
+
+def _build_streaming_callback(console: Console):
+    """Create a callback that prints streaming events as they arrive."""
+
+    text_progress: dict[tuple[str, int], int] = {}
+    thinking_progress: dict[tuple[str, int], int] = {}
+    active_text_lines: set[tuple[str, int]] = set()
+    active_thinking_lines: set[tuple[str, int]] = set()
+
+    def _emit_text_chunk(worker: str, index: int, content: str) -> None:
+        if not content:
+            return
+        key = (worker, index)
+        if key not in active_text_lines:
+            console.print(Text(f"[{worker}] ", style="cyan"), end="")
+            active_text_lines.add(key)
+        console.print(Text(content, style="magenta"), end="")
+
+    def _emit_text_from_content(worker: str, index: int, content: str, finalize: bool = False) -> None:
+        key = (worker, index)
+        already = text_progress.get(key, 0)
+        new_chunk = content[already:]
+        if new_chunk:
+            _emit_text_chunk(worker, index, new_chunk)
+            text_progress[key] = already + len(new_chunk)
+        if finalize and key in active_text_lines:
+            console.print()
+            active_text_lines.remove(key)
+            text_progress.pop(key, None)
+
+    def _emit_text_delta(worker: str, index: int, delta: str) -> None:
+        if not delta:
+            return
+        key = (worker, index)
+        _emit_text_chunk(worker, index, delta)
+        text_progress[key] = text_progress.get(key, 0) + len(delta)
+
+    def _emit_thinking_chunk(worker: str, index: int, content: str) -> None:
+        if not content:
+            return
+        key = (worker, index)
+        if key not in active_thinking_lines:
+            console.print(Text(f"[{worker} 🤔] ", style="yellow"), end="")
+            active_thinking_lines.add(key)
+        console.print(Text(content, style="dim"), end="")
+
+    def _emit_thinking_from_content(worker: str, index: int, content: str, finalize: bool = False) -> None:
+        key = (worker, index)
+        already = thinking_progress.get(key, 0)
+        new_chunk = content[already:]
+        if new_chunk:
+            _emit_thinking_chunk(worker, index, new_chunk)
+            thinking_progress[key] = already + len(new_chunk)
+        if finalize and key in active_thinking_lines:
+            console.print()
+            active_thinking_lines.remove(key)
+            thinking_progress.pop(key, None)
+
+    def _emit_thinking_delta(worker: str, index: int, delta: ThinkingPartDelta) -> None:
+        if delta.content_delta:
+            key = (worker, index)
+            _emit_thinking_chunk(worker, index, delta.content_delta)
+            thinking_progress[key] = thinking_progress.get(key, 0) + len(delta.content_delta)
+
+    def _format_jsonish(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, indent=2)
+        except Exception:  # pragma: no cover - defensive
+            return str(value)
+
+    def _print_tool_call(worker: str, part: ToolCallPart) -> None:
+        console.print()
+        args_text = _format_jsonish(part.args)
+        console.print(Panel(
+            Syntax(args_text, "json", theme="monokai", line_numbers=False)
+            if args_text.strip().startswith(("{", "["))
+            else Text(args_text),
+            title=f"[bold blue]{worker} ▷ Tool Call: {part.tool_name}[/bold blue]",
+            border_style="blue",
+        ))
+
+    def _print_tool_result(worker: str, result: ToolReturnPart | RetryPromptPart) -> None:
+        console.print()
+        if isinstance(result, ToolReturnPart):
+            payload = _format_jsonish(result.content)
+            body = (
+                Syntax(payload, "json", theme="monokai", line_numbers=False)
+                if payload.strip().startswith(("{", "["))
+                else Text(payload)
+            )
+            title = f"[bold yellow]{worker} ◁ Tool Result: {result.tool_name}[/bold yellow]"
+        else:
+            body = Text(result.instructions or "Retry requested", style="yellow")
+            title = f"[bold yellow]{worker} ◁ Tool Retry[/bold yellow]"
+        console.print(Panel(body, title=title, border_style="yellow"))
+
+    def _callback(events: list[Any]) -> None:
+        for payload in events:
+            if isinstance(payload, dict):
+                worker = str(payload.get("worker", "worker"))
+                event = payload.get("event")
+            else:
+                worker = "worker"
+                event = payload
+
+            if event is None:
+                continue
+
+            if isinstance(event, PartStartEvent):
+                part = event.part
+                if isinstance(part, TextPart):
+                    _emit_text_from_content(worker, event.index, part.content)
+                elif isinstance(part, ThinkingPart):
+                    _emit_thinking_from_content(worker, event.index, part.content)
+            elif isinstance(event, PartDeltaEvent):
+                if isinstance(event.delta, TextPartDelta):
+                    _emit_text_delta(worker, event.index, event.delta.content_delta)
+                elif isinstance(event.delta, ThinkingPartDelta):
+                    _emit_thinking_delta(worker, event.index, event.delta)
+            elif isinstance(event, PartEndEvent):
+                part = event.part
+                if isinstance(part, TextPart):
+                    _emit_text_from_content(worker, event.index, part.content, finalize=True)
+                elif isinstance(part, ThinkingPart):
+                    _emit_thinking_from_content(worker, event.index, part.content, finalize=True)
+            elif isinstance(event, FunctionToolCallEvent):
+                _print_tool_call(worker, event.part)
+            elif isinstance(event, FunctionToolResultEvent):
+                _print_tool_result(worker, event.result)
+
+        console.file.flush()
+
+    return _callback
 
 
 
@@ -255,6 +399,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             # For now, default to approve_all to match previous behavior
             approval_callback = approve_all_callback
 
+        streaming_callback = None if args.json else _build_streaming_callback(console)
+
         result = run_worker(
             registry=registry,
             worker=worker_name,
@@ -263,6 +409,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             cli_model=args.cli_model,
             creation_defaults=creation_defaults,
             approval_callback=approval_callback,
+            message_callback=streaming_callback,
         )
 
         # JSON output mode (for scripting/automation)
