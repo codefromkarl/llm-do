@@ -147,82 +147,53 @@ Expected output: Friendly greeting and response with rich formatted message trac
 
 ### Example 2: Pitch Deck Evaluation (Multi-Worker)
 
-A complete workflow demonstrating worker delegation, PDF attachments, and clean I/O separation.
+See `examples/pitchdeck_eval/` for a complete implementation.
 
-**Scenario**: Analyze PDF pitch decks using a shared evaluation rubric.
+This example demonstrates the core design principles of multi-worker systems:
 
-**Structure:**
-```
-examples/pitchdeck_eval/
-  workers/
-    pitch_orchestrator.yaml  # Orchestrator (handles I/O)
-    pitch_evaluator.yaml     # Evaluator (pure analysis)
-  prompts/
-    pitch_orchestrator.txt   # I/O logic (list PDFs, write reports)
-    pitch_evaluator.jinja2   # Analysis logic (read PDF, output markdown)
-    PROCEDURE.md            # Evaluation rubric (loaded by Jinja2)
-  input/
-    *.pdf                   # Drop PDF pitch decks here
-  evaluations/              # Generated markdown reports
-```
+**Clean Separation of Concerns**
 
-**How it works:**
-1. **Orchestrator** lists `.pdf` files in `input/` sandbox
-2. For each PDF, **orchestrator** calls **evaluator** via `worker_call()` with PDF as attachment
-3. **Evaluator** reads PDF natively (LLM vision), applies rubric, returns markdown report
-4. **Orchestrator** writes markdown directly to `evaluations/{slug}.md`
+The orchestrator handles all I/O (listing files, writing reports), while the evaluator
+focuses purely on analysis. This separation makes each worker:
+- **Testable**: Pure analysis logic is easy to test with different inputs
+- **Reusable**: Evaluator can be called from any workflow needing deck analysis
+- **Maintainable**: I/O changes don't affect analysis; rubric changes don't affect I/O
 
-**Design highlights:**
-- PDFs passed as **attachments** (not file paths) for native LLM reading
-- Evaluator outputs **markdown** (not JSON) - simpler, cleaner
-- Clean separation: orchestrator = I/O, evaluator = analysis
+**Attachment-Based File Passing**
 
-**Run it:**
+Instead of sharing sandboxes or passing file paths, the orchestrator sends PDFs as
+attachments via `worker_call(attachments=["input/deck.pdf"])`. The evaluator receives
+the PDF directly and uses LLM vision to read it natively—no text extraction, no
+preprocessing. This pattern works for any file type the LLM can process.
+
+**Configuration as Code**
+
+The evaluation rubric lives in `prompts/PROCEDURE.md` and gets loaded into the
+evaluator's instructions via Jinja2: `{{ file('PROCEDURE.md') }}`. This keeps
+configuration close to the prompt logic, version-controlled and auditable. Change
+the rubric, get different evaluations—no code changes needed.
+
+**Progressive Refinement**
+
+The evaluator returns simple markdown (not JSON with schemas). This makes iteration
+fast: tweak the prompt template, run again, inspect the markdown. Later, if you need
+structured output for aggregation, add a schema. Start simple; add structure when
+needed.
+
+**Run the example:**
 ```bash
 cd examples/pitchdeck_eval
 llm-do pitch_orchestrator \
-  "Evaluate all pitch decks in the pipeline" \
+  "Evaluate all pitch decks" \
   --model anthropic:claude-sonnet-4-20250514 \
   --approve-all
 ```
 
-Worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
+The rich formatted output shows every tool call, worker delegation, and approval
+decision—full transparency into what the system is doing.
 
-The output shows rich formatted message traces including all tool calls, file operations,
-and worker delegations with color-coded panels. The `--approve-all` flag auto-approves
-file writes (omit for interactive approval prompts).
-
-**What you'll see:**
-- Orchestrator discovers PDF files in `input/`
-- For each PDF:
-  - Calls `pitch_evaluator` with PDF as attachment
-  - Evaluator reads PDF natively and returns markdown
-  - Writes markdown report to `evaluations/`
-- Rich formatted message trace showing:
-  - Sandbox listing
-  - Worker delegation with attachments
-  - PDF analysis by LLM
-  - File writes (with approval prompts)
-
-**Requirements**: Use a model with PDF/vision support (Claude 3.5 Sonnet, GPT-4 Vision, Gemini 1.5 Pro)
-
-**Try it yourself:**
-- Add pitch decks: Drop PDF files into `input/`
-- Customize rubric: Edit `prompts/PROCEDURE.md` to change evaluation criteria
-- Adjust markdown format: Edit `prompts/pitch_evaluator.jinja2` to change report structure
-- Tweak I/O logic: Edit `prompts/pitch_orchestrator.txt` to change file handling
-
-**Key features demonstrated:**
-- **PDF attachments**: Files passed to workers via `worker_call(attachments=[...])`
-- **Native PDF reading**: LLM reads PDFs directly (vision capabilities)
-- **Prompts directory convention**: Instructions from `prompts/{worker_name}.{jinja2,txt,md}`
-- **Jinja2 templates**: Evaluator loads rubric via `{{ file('PROCEDURE.md') }}`
-- **Markdown output**: Evaluator returns markdown (no JSON conversion needed)
-- **Sandboxed I/O**: Orchestrator handles all file operations
-- **Worker delegation**: Clean separation of concerns (I/O vs analysis)
-- **Tool approval**: Write operations gated by approval system
-
-Each PDF gets isolated evaluation = reproducible, auditable results.
+For implementation details, usage patterns, and customization options, see the
+[example's README](examples/pitchdeck_eval/README.md).
 
 ## Progressive Hardening Workflow
 
