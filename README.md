@@ -216,7 +216,7 @@ file writes (omit for interactive approval prompts).
 - **PDF attachments**: Files passed to workers via `worker_call(attachments=[...])`
 - **Native PDF reading**: LLM reads PDFs directly (vision capabilities)
 - **Prompts directory convention**: Instructions from `prompts/{worker_name}.{jinja2,txt,md}`
-- **Jinja2 templates**: Evaluator loads rubric via `{{ file('prompts/PROCEDURE.md') }}`
+- **Jinja2 templates**: Evaluator loads rubric via `{{ file('PROCEDURE.md') }}`
 - **Markdown output**: Evaluator returns markdown (no JSON conversion needed)
 - **Sandboxed I/O**: Orchestrator handles all file operations
 - **Worker delegation**: Clean separation of concerns (I/O vs analysis)

@@ -10,7 +10,7 @@ This example demonstrates a clean multi-worker workflow for analyzing pitch deck
 - `workers/pitch_orchestrator.yaml` — Orchestrator worker definition
 - `workers/pitch_evaluator.yaml` — Evaluator worker definition
 - `prompts/pitch_orchestrator.txt` — Orchestrator instructions (I/O logic)
-- `prompts/pitch_evaluator.jinja2` — Evaluator instructions with rubric via `{{ file('prompts/PROCEDURE.md') }}`
+- `prompts/pitch_evaluator.jinja2` — Evaluator instructions with rubric via `{{ file('PROCEDURE.md') }}`
 - `prompts/PROCEDURE.md` — Evaluation rubric (loaded by Jinja2)
 - `input/` — Drop PDF pitch decks here for evaluation
 - `evaluations/` — Generated markdown reports written here

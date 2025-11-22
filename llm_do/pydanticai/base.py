@@ -265,14 +265,14 @@ def _load_prompt_file(worker_name: str, prompts_dir: Path) -> tuple[str, bool]:
 
 
 def _render_jinja_template(template_str: str, template_root: Path) -> str:
-    """Render a Jinja2 template with project root as the base directory.
+    """Render a Jinja2 template with prompts/ directory as the base.
 
     Provides a `file(path)` function that loads files relative to template_root.
     Also supports standard {% include %} directive.
 
     Args:
         template_str: Jinja2 template string
-        template_root: Root directory for template file loading (project root)
+        template_root: Root directory for template file loading (prompts/ directory)
 
     Returns:
         Rendered template string
@@ -283,7 +283,7 @@ def _render_jinja_template(template_str: str, template_root: Path) -> str:
         jinja2.TemplateError: If template syntax is invalid
     """
 
-    # Set up Jinja2 environment with project root as base
+    # Set up Jinja2 environment with prompts/ as base
     env = Environment(
         loader=FileSystemLoader(template_root),
         autoescape=False,  # Don't escape - we want raw text
@@ -381,8 +381,8 @@ class WorkerRegistry:
                 worker_name = data.get("name", name)
                 prompt_content, is_jinja = _load_prompt_file(worker_name, prompts_dir)
                 if is_jinja:
-                    # Jinja2 root is project_root (where config/, prompts/ live)
-                    data["instructions"] = _render_jinja_template(prompt_content, project_root)
+                    # Jinja2 root is prompts/ directory
+                    data["instructions"] = _render_jinja_template(prompt_content, prompts_dir)
                 else:
                     data["instructions"] = prompt_content
             # If no prompts/ directory exists and no inline instructions, let validation handle it
@@ -391,8 +391,8 @@ class WorkerRegistry:
             # Simple heuristic: if contains {{ or {%, assume it's a template
             instructions_str = data["instructions"]
             if "{{" in instructions_str or "{%" in instructions_str:
-                # Jinja2 root is project_root (where config/, prompts/ live)
-                data["instructions"] = _render_jinja_template(instructions_str, project_root)
+                # Jinja2 root is prompts/ directory
+                data["instructions"] = _render_jinja_template(instructions_str, prompts_dir)
 
         # Inject sandbox names from dictionary keys
         if "sandboxes" in data and isinstance(data["sandboxes"], dict):

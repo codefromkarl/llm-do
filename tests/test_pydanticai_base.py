@@ -330,18 +330,19 @@ def test_jinja_file_function(tmp_path):
     """Test that Jinja2 file() function loads files correctly."""
     # Create registry and support file
     registry_root = tmp_path / "workers"
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(parents=True)
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir(parents=True)
 
-    # Create a config file
-    rubric_file = config_dir / "rubric.md"
+    # Create a rubric file in prompts directory
+    rubric_file = prompts_dir / "rubric.md"
     rubric_file.write_text("# Evaluation Rubric\n\nScore from 1-5.")
 
     # Create worker definition with Jinja2 file() function
+    # File paths are relative to prompts/ directory
     registry = WorkerRegistry(registry_root)
     worker_def = WorkerDefinition(
         name="evaluator",
-        instructions="Evaluate using this rubric:\n\n{{ file('config/rubric.md') }}\n\nReturn scores.",
+        instructions="Evaluate using this rubric:\n\n{{ file('rubric.md') }}\n\nReturn scores.",
     )
     registry.save_definition(worker_def)
 
@@ -357,18 +358,19 @@ def test_jinja_file_function(tmp_path):
 def test_jinja_include_directive(tmp_path):
     """Test that standard Jinja2 {% include %} directive works."""
     registry_root = tmp_path / "workers"
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(parents=True)
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir(parents=True)
 
-    # Create a config file
-    procedure_file = config_dir / "procedure.txt"
+    # Create a procedure file in prompts directory
+    procedure_file = prompts_dir / "procedure.txt"
     procedure_file.write_text("Step 1: Analyze\nStep 2: Score")
 
     # Create worker with {% include %} directive
+    # Include paths are relative to prompts/ directory
     registry = WorkerRegistry(registry_root)
     worker_def = WorkerDefinition(
         name="worker",
-        instructions="Follow this procedure:\n{% include 'config/procedure.txt' %}",
+        instructions="Follow this procedure:\n{% include 'procedure.txt' %}",
     )
     registry.save_definition(worker_def)
 
