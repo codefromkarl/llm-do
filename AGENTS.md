@@ -15,7 +15,8 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 
 ## Development
 
-- Run `pytest` before committing (tests use dummy models, no live API calls)
+- Run `.venv/bin/pytest` before committing (tests use dummy models, no live API calls)
+- For executing python scripts use `.venv/bin/python` - the global environment does not have all dependencies
 - Prefer creating/editing workers via `workers/*.yaml` and run them with `llm-do`
 - Style: black, 4 spaces, snake_case/PascalCase
 - No backwards compatibility promise—breaking changes are fine if they improve design
@@ -45,6 +46,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 - Forgetting to configure sandboxes leads to runtime `KeyError`
 - Approval rules default to auto-approve; lock down `tool_rules` for critical workers
 - Model inheritance is worker → caller → CLI flag; set `model` in YAML if a worker needs a specific model
+
 
 ---
 
