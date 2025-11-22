@@ -41,18 +41,12 @@ from .base import (
     approve_all_callback,
     strict_mode_callback,
 )
-
-
-def _render_json_or_text(value: Any) -> JSON | Text:
-    """Render value as Rich JSON or Text with fallback for edge cases."""
-    if isinstance(value, str):
-        return Text(value)
-
-    try:
-        return JSON.from_data(value)
-    except (TypeError, ValueError):
-        # Fallback for non-serializable objects (should rarely happen)
-        return Text(repr(value), style="dim")
+from .cli_display import (
+    display_initial_request,
+    display_messages,
+    render_json_or_text,
+    stringify_user_input,
+)
 
 
 def _is_interactive_terminal() -> bool:
@@ -86,122 +80,6 @@ def _load_creation_defaults(path: Optional[str]) -> WorkerCreationDefaults:
     return WorkerCreationDefaults.model_validate(data)
 
 
-def _display_messages(messages: list[ModelMessage], console: Console) -> None:
-    """Display LLM messages with rich formatting."""
-    for msg in messages:
-        if isinstance(msg, ModelRequest):
-            # User/system input to the model
-            console.print()
-
-            if msg.instructions:
-                console.print(Panel(
-                    msg.instructions,
-                    title="[bold cyan]System Instructions[/bold cyan]",
-                    border_style="cyan",
-                ))
-
-            for part in msg.parts:
-                if isinstance(part, UserPromptPart):
-                    # Handle both string and list content (with attachments)
-                    if isinstance(part.content, str):
-                        display_content = part.content
-                    else:
-                        # part.content is a Sequence[UserContent] with text + attachments
-                        text_parts = []
-                        attachment_count = 0
-                        for item in part.content:
-                            if isinstance(item, str):
-                                text_parts.append(item)
-                            else:
-                                # BinaryContent, ImageUrl, etc.
-                                attachment_count += 1
-
-                        display_content = "\n".join(text_parts)
-                        if attachment_count:
-                            display_content += f"\n\n[dim]+ {attachment_count} attachment(s)[/dim]"
-
-                    console.print(Panel(
-                        display_content,
-                        title="[bold green]User Input[/bold green]",
-                        border_style="green",
-                    ))
-                elif isinstance(part, SystemPromptPart):
-                    console.print(Panel(
-                        part.content,
-                        title="[bold cyan]System Prompt[/bold cyan]",
-                        border_style="cyan",
-                    ))
-                elif isinstance(part, ToolReturnPart):
-                    # Tool result being sent back to model
-                    tool_content = part.content
-                    if isinstance(tool_content, str):
-                        display_content = tool_content
-                    else:
-                        display_content = json.dumps(tool_content, indent=2)
-
-                    console.print(Panel(
-                        Syntax(display_content, "json", theme="monokai", line_numbers=False),
-                        title=f"[bold yellow]Tool Result: {part.tool_name}[/bold yellow]",
-                        border_style="yellow",
-                    ))
-
-        elif isinstance(msg, ModelResponse):
-            # Model's response
-            for part in msg.parts:
-                if isinstance(part, TextPart):
-                    console.print(Panel(
-                        part.content,
-                        title="[bold magenta]Model Response[/bold magenta]",
-                        border_style="magenta",
-                    ))
-                elif isinstance(part, ToolCallPart):
-                    # Model is calling a tool
-                    args_json = json.dumps(part.args, indent=2)
-                    console.print(Panel(
-                        Syntax(args_json, "json", theme="monokai", line_numbers=False),
-                        title=f"[bold blue]Tool Call: {part.tool_name}[/bold blue]",
-                        border_style="blue",
-                    ))
-
-
-def _stringify_user_input(user_input: Any) -> str:
-    """Convert arbitrary input data to displayable text."""
-
-    if isinstance(user_input, str):
-        return user_input
-    return json.dumps(user_input, indent=2, sort_keys=True)
-
-
-def _display_initial_request(
-    *,
-    definition: "WorkerDefinition",
-    user_input: Any,
-    attachments: Optional[list[str]],
-    console: Console,
-) -> None:
-    """Render the outgoing message sent to the LLM before streaming starts."""
-
-    prompt_text = _stringify_user_input(user_input)
-    user_content: Any
-    if attachments:
-        user_content = [prompt_text]
-        for attachment in attachments:
-            placeholder = BinaryContent(
-                data=b"",
-                media_type="application/octet-stream",
-                identifier=Path(attachment).name,
-            )
-            user_content.append(placeholder)
-    else:
-        user_content = prompt_text
-
-    request = ModelRequest(
-        parts=[UserPromptPart(content=user_content)],
-        instructions=definition.instructions,
-    )
-    _display_messages([request], console)
-
-
 def _build_interactive_approval_callback(
     console: Console,
     *,
@@ -222,7 +100,7 @@ def _build_interactive_approval_callback(
         body = Group(
             Text(f"Reason: {reason_text}\n", style="bold red"),
             Text("Payload:", style="bold"),
-            _render_json_or_text(payload),
+            render_json_or_text(payload),
         )
         console.print()
         console.print(
@@ -264,7 +142,7 @@ def _build_streaming_callback(console: Console):
     def _print_tool_call(worker: str, part: ToolCallPart) -> None:
         console.print()
         console.print(Panel(
-            _render_json_or_text(part.args),
+            render_json_or_text(part.args),
             title=f"[bold blue]{worker} ▷ Tool Call: {part.tool_name}[/bold blue]",
             border_style="blue",
         ))
@@ -426,7 +304,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not args.json:
             preview_definition = registry.load_definition(worker_name)
             console.print("\n[bold white]═══ Message Exchange ═══[/bold white]\n")
-            _display_initial_request(
+            display_initial_request(
                 definition=preview_definition,
                 user_input=input_data,
                 attachments=args.attachments,
