@@ -6,16 +6,16 @@ configured to require approval each time.
 
 ## Files
 
-- `workers/append_note.yaml` – worker definition that treats the entire user
-  input as the note text and appends it to `notes/activity.log`.
+- `workers/save_note.yaml` – worker definition that treats the entire user
+  input as the note text and overwrites `notes/activity.log` (append support
+  coming later).
 - `notes/` – sandbox directory where the log is stored. It starts empty.
 
 ## Run it
 
 ```bash
 cd examples/approvals_demo
-llm-do append_note \
-  --model anthropic:claude-3-5-haiku-20241022 \
+llm-do save_note --model anthropic:claude-3-5-haiku \
   "Interactive approvals are working"
 ```
 
