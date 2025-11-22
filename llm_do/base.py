@@ -180,14 +180,29 @@ class WorkerRegistry:
         self.root.mkdir(parents=True, exist_ok=True)
 
     # paths -----------------------------------------------------------------
-    def _definition_path(self, name: str) -> Path:
+    def _get_search_paths(self, name: str) -> List[Path]:
         base = Path(name)
         if base.suffix:
-            return base if base.is_absolute() else (self.root / base)
+            return [base if base.is_absolute() else (self.root / base)]
 
-        # Check workers/ subdirectory by convention
-        workers_path = self.root / "workers" / f"{name}.yaml"
-        return workers_path
+        candidates = [
+            self.root / "workers" / f"{name}.yaml",
+            self.root / "workers" / "generated" / f"{name}.yaml",
+        ]
+        
+        # Add built-in path
+        builtin_path = Path(__file__).parent / "workers" / f"{name}.yaml"
+        candidates.append(builtin_path)
+        
+        return candidates
+
+    def _definition_path(self, name: str) -> Path:
+        # Legacy helper: return the first existing path, or the default user path
+        paths = self._get_search_paths(name)
+        for path in paths:
+            if path.exists():
+                return path
+        return paths[0]  # Default to workers/{name}.yaml
 
     def _load_raw(self, path: Path) -> Dict[str, Any]:
         suffix = path.suffix.lower()
@@ -201,14 +216,18 @@ class WorkerRegistry:
     def load_definition(self, name: str) -> WorkerDefinition:
         path = self._definition_path(name)
         if not path.exists():
+            # _definition_path returns the first candidate if none exist,
+            # but we want to be sure we checked all of them in the error message
             raise FileNotFoundError(f"Worker definition not found: {name}")
         data = self._load_raw(path)
 
-        # Determine project root: if worker is in workers/ subdirectory, go up one level
-        # This allows both flat structure (worker.yaml, prompts/) and nested (workers/, prompts/)
+        # Determine project root: workers stored under project/workers/** should inherit
+        # the project root directory so prompts/ resolves correctly.
         project_root = path.parent
-        if project_root.name == "workers":
-            project_root = project_root.parent
+        resolved_path = path.resolve()
+        user_workers_dir = (self.root / "workers").resolve()
+        if resolved_path.is_relative_to(user_workers_dir):
+            project_root = user_workers_dir.parent
 
         prompts_dir = project_root / "prompts"
         worker_name = data.get("name", name)
@@ -396,6 +415,14 @@ class WorkerContext:
             raise FileNotFoundError(f"Attachment not found: {value}")
         if not target.is_file():
             raise IsADirectoryError(f"Attachment must be a file: {value}")
+
+        suffix = target.suffix.lower()
+        attachment_suffixes = getattr(sandbox_root, "attachment_suffixes", [])
+        if attachment_suffixes and suffix not in attachment_suffixes:
+            raise PermissionError(
+                f"Attachments from sandbox '{sandbox_name}' must use suffixes:"
+                f" {', '.join(sorted(attachment_suffixes))}"
+            )
 
         size = target.stat().st_size
         info = {"sandbox": sandbox_name, "path": relative_path, "bytes": size}
@@ -633,8 +660,10 @@ def call_worker(
     agent_runner: AgentRunner = _default_agent_runner,
     ) -> WorkerRunResult:
     allowed = caller_context.worker.allow_workers
-    if allowed and worker not in allowed:
-        raise PermissionError(f"Delegation to '{worker}' is not allowed")
+    if allowed:
+        allowed_set = set(allowed)
+        if "*" not in allowed_set and worker not in allowed_set:
+            raise PermissionError(f"Delegation to '{worker}' is not allowed")
     return run_worker(
         registry=registry,
         worker=worker,
@@ -657,7 +686,11 @@ def create_worker(
     force: bool = False,
 ) -> WorkerDefinition:
     definition = defaults.expand_spec(spec)
-    registry.save_definition(definition, force=force)
+    
+    # Default to workers/generated/ for new workers
+    path = registry.root / "workers" / "generated" / f"{spec.name}.yaml"
+    
+    registry.save_definition(definition, force=force, path=path)
     return definition
 
 

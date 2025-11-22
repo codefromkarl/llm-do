@@ -61,7 +61,7 @@ def _is_interactive_terminal() -> bool:
         return False
 
 
-def _load_jsonish(value: str) -> Any:
+def _load_jsonish(value: str, *, allow_plain_text: bool = False) -> Any:
     """Load JSON from an inline string or filesystem path.
 
     The helper mirrors the permissive behavior of many CLIs: if the argument
@@ -71,9 +71,18 @@ def _load_jsonish(value: str) -> Any:
     """
 
     candidate = Path(value)
+    source: str
     if candidate.exists():
-        return json.loads(candidate.read_text(encoding="utf-8"))
-    return json.loads(value)
+        source = candidate.read_text(encoding="utf-8")
+    else:
+        source = value
+
+    try:
+        return json.loads(source)
+    except json.JSONDecodeError:
+        if allow_plain_text:
+            return source
+        raise
 
 
 def _load_creation_defaults(path: Optional[str]) -> WorkerCreationDefaults:
@@ -264,7 +273,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         # Determine input data
         if args.input_json is not None:
             # Use JSON input if provided
-            input_data = _load_jsonish(args.input_json)
+            input_data = _load_jsonish(args.input_json, allow_plain_text=True)
         elif args.message is not None:
             # Use plain text message
             input_data = args.message

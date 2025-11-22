@@ -89,6 +89,10 @@ Workers read/write files through configured sandboxes:
 - Each sandbox has a root directory and access mode (read-only or writable)
 - Path escapes blocked by design
 - File size limits prevent resource exhaustion
+- Optional suffix filters:
+  - `text_suffixes` restrict which file types may be opened via `sandbox_read_text`
+  - `attachment_suffixes` restrict which file types may be passed as attachments
+  - `allowed_suffixes` (on writable sandboxes) restrict which files can be created
 
 ```python
 # In a worker's tools
@@ -96,6 +100,11 @@ files = sandbox_list("input", "*.pdf")
 content = sandbox_read_text("input", files[0])
 sandbox_write_text("output", "result.md", report)
 ```
+
+`sandbox_read_text` is strictly for UTF-8 text files (markdown, JSON, YAML).
+For binary assets—PDFs, images, spreadsheets—pass the path via `attachments`
+when calling another worker so the LLM can read the file natively. Attempting to
+read those formats as text will fail or garble the data.
 
 ### Worker-to-Worker Delegation
 Workers invoke other workers with controlled inputs:

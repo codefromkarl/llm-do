@@ -44,7 +44,13 @@ def _parent_context(registry, worker, defaults=None):
     )
 
 
-def _parent_with_sandbox(tmp_path, *, attachment_policy: AttachmentPolicy | None = None):
+def _parent_with_sandbox(
+    tmp_path,
+    *,
+    attachment_policy: AttachmentPolicy | None = None,
+    text_suffixes: list[str] | None = None,
+    attachment_suffixes: list[str] | None = None,
+):
     sandbox_root = tmp_path / "input"
     sandbox_root.mkdir()
     parent = WorkerDefinition(
@@ -57,11 +63,34 @@ def _parent_with_sandbox(tmp_path, *, attachment_policy: AttachmentPolicy | None
                 path=sandbox_root,
                 mode="ro",
                 allowed_suffixes=[".pdf", ".txt"],
+                text_suffixes=text_suffixes or [".txt"],
+                attachment_suffixes=attachment_suffixes or [".pdf"],
             )
         },
         attachment_policy=attachment_policy or AttachmentPolicy(),
     )
     return parent, sandbox_root
+
+
+def test_sandbox_read_text_rejects_binary_suffix(tmp_path):
+    sandbox_root = tmp_path / "input"
+    sandbox_root.mkdir()
+    txt_path = sandbox_root / "note.txt"
+    txt_path.write_text("hello", encoding="utf-8")
+    pdf_path = sandbox_root / "deck.pdf"
+    pdf_path.write_text("fake pdf", encoding="utf-8")
+
+    cfg = SandboxConfig(
+        name="input",
+        path=sandbox_root,
+        mode="ro",
+        text_suffixes=[".txt"],
+    )
+    manager = SandboxManager({"input": cfg})
+
+    assert manager.read_text("input", "note.txt") == "hello"
+    with pytest.raises(PermissionError):
+        manager.read_text("input", "deck.pdf")
 
 
 def test_call_worker_forwards_attachments(tmp_path):
@@ -206,6 +235,25 @@ def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
 
     assert result == {"status": "ok"}
     assert captured["attachments"] == [attachment.resolve()]
+
+
+def test_worker_call_tool_rejects_disallowed_sandbox_attachment(tmp_path):
+    registry = _registry(tmp_path)
+    parent, sandbox_root = _parent_with_sandbox(
+        tmp_path, attachment_suffixes=[".pdf"]
+    )
+    registry.save_definition(parent)
+    context = _parent_context(registry, parent)
+    disallowed = sandbox_root / "note.txt"
+    disallowed.write_text("memo", encoding="utf-8")
+
+    with pytest.raises(PermissionError):
+        _worker_call_tool(
+            context,
+            worker="child",
+            input_data={"task": "demo"},
+            attachments=["input/note.txt"],
+        )
 
 
 def test_worker_call_tool_parent_policy_suffix(tmp_path):

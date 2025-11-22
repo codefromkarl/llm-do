@@ -206,6 +206,82 @@ def test_create_worker_applies_creation_defaults(registry, tmp_path):
     assert "rw" in created.sandboxes
     loaded = registry.load_definition("beta")
     assert loaded.sandboxes["rw"].path == (tmp_path / "rw").resolve()
+    generated_path = registry.root / "workers" / "generated" / "beta.yaml"
+    assert generated_path.exists()
+
+
+def test_create_worker_writes_definition_to_generated_dir(registry):
+    defaults = WorkerCreationDefaults()
+    spec = WorkerSpec(name="gamma", instructions="demo")
+
+    create_worker(registry, spec, defaults=defaults)
+
+    generated_path = registry.root / "workers" / "generated" / "gamma.yaml"
+    assert generated_path.exists()
+    definition = registry.load_definition("gamma")
+    assert definition.instructions == "demo"
+
+
+def test_registry_prefers_project_workers_over_generated(tmp_path, resolver):
+    root = _project_root(tmp_path)
+    registry = WorkerRegistry(root, output_schema_resolver=resolver)
+
+    generated_dir = root / "workers" / "generated"
+    generated_dir.mkdir(parents=True)
+    (generated_dir / "foo.yaml").write_text(
+        "name: foo\ninstructions: generated\n",
+        encoding="utf-8",
+    )
+
+    project_dir = root / "workers"
+    project_dir.mkdir(exist_ok=True)
+    (project_dir / "foo.yaml").write_text(
+        "name: foo\ninstructions: project\n",
+        encoding="utf-8",
+    )
+
+    definition = registry.load_definition("foo")
+    assert definition.instructions == "project"
+
+
+def test_registry_loads_generated_worker_when_project_missing(tmp_path, resolver):
+    root = _project_root(tmp_path)
+    registry = WorkerRegistry(root, output_schema_resolver=resolver)
+
+    generated_dir = root / "workers" / "generated"
+    generated_dir.mkdir(parents=True)
+    (generated_dir / "foo.yaml").write_text(
+        "name: foo\ninstructions: generated\n",
+        encoding="utf-8",
+    )
+
+    definition = registry.load_definition("foo")
+    assert definition.instructions == "generated"
+
+
+def test_registry_loads_built_in_worker_when_not_found_locally(tmp_path, resolver):
+    root = _project_root(tmp_path)
+    registry = WorkerRegistry(root, output_schema_resolver=resolver)
+
+    definition = registry.load_definition("worker_bootstrapper")
+    assert definition.name == "worker_bootstrapper"
+    assert "worker_call" in (definition.instructions or "")
+
+
+def test_generated_worker_resolves_prompts_from_project_root(tmp_path, resolver):
+    root = _project_root(tmp_path)
+    registry = WorkerRegistry(root, output_schema_resolver=resolver)
+
+    prompts_dir = root / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "foo.txt").write_text("Prompt text", encoding="utf-8")
+
+    generated_dir = root / "workers" / "generated"
+    generated_dir.mkdir(parents=True)
+    (generated_dir / "foo.yaml").write_text("name: foo\n", encoding="utf-8")
+
+    definition = registry.load_definition("foo")
+    assert definition.instructions == "Prompt text"
 
 
 def test_call_worker_respects_allowlist(registry):
@@ -243,6 +319,42 @@ def test_call_worker_respects_allowlist(registry):
 
     assert result.output["worker"] == "child"
     assert result.output["model"] == "cli"
+
+
+def test_call_worker_supports_wildcard_allowlist(registry):
+    parent_def = WorkerDefinition(
+        name="parent",
+        instructions="",
+        allow_workers=["*"],
+    )
+    child_def = WorkerDefinition(name="child", instructions="")
+    registry.save_definition(parent_def)
+    registry.save_definition(child_def)
+
+    def simple_runner(defn, input_data, ctx, output_model):
+        return {"worker": defn.name, "input": input_data}
+
+    controller = ApprovalController(parent_def.tool_rules)
+    sandbox_manager = SandboxManager(parent_def.sandboxes)
+    parent_context = WorkerContext(
+        registry=registry,
+        worker=parent_def,
+        sandbox_manager=sandbox_manager,
+        sandbox_toolset=SandboxToolset(sandbox_manager, controller),
+        creation_defaults=WorkerCreationDefaults(),
+        effective_model="cli",
+        approval_controller=controller,
+    )
+
+    result = call_worker(
+        registry=registry,
+        worker="child",
+        input_data={"note": "ok"},
+        caller_context=parent_context,
+        agent_runner=simple_runner,
+    )
+
+    assert result.output["worker"] == "child"
 
 
 def test_call_worker_propagates_message_callback(registry):

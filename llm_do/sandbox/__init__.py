@@ -67,6 +67,12 @@ class SandboxConfig(BaseModel):
     path: Path
     mode: str = Field(default="ro", description="ro or rw")
     allowed_suffixes: List[str] = Field(default_factory=list)
+    text_suffixes: List[str] = Field(
+        default_factory=list, description="Suffixes allowed for sandbox_read_text"
+    )
+    attachment_suffixes: List[str] = Field(
+        default_factory=list, description="Suffixes allowed when attaching files"
+    )
     max_bytes: int = 2_000_000
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -79,7 +85,7 @@ class SandboxConfig(BaseModel):
             raise ValueError("Sandbox mode must be 'ro' or 'rw'")
         return normalized
 
-    @field_validator("allowed_suffixes")
+    @field_validator("allowed_suffixes", "text_suffixes", "attachment_suffixes")
     @classmethod
     def _lower_suffixes(cls, value: List[str]) -> List[str]:
         return [suffix.lower() for suffix in value]
@@ -91,6 +97,8 @@ class SandboxRoot:
     path: Path
     read_only: bool
     allowed_suffixes: List[str]
+    text_suffixes: List[str]
+    attachment_suffixes: List[str]
     max_bytes: int
 
     def resolve(self, relative: str) -> Path:
@@ -116,6 +124,8 @@ class SandboxManager:
                 path=root,
                 read_only=cfg.mode == "ro",
                 allowed_suffixes=list(cfg.allowed_suffixes),
+                text_suffixes=list(cfg.text_suffixes),
+                attachment_suffixes=list(cfg.attachment_suffixes),
                 max_bytes=cfg.max_bytes,
             )
 
@@ -140,6 +150,11 @@ class SandboxManager:
         target = root.resolve(path)
         if not target.exists() or not target.is_file():
             raise FileNotFoundError(path)
+        suffix = target.suffix.lower()
+        if root.text_suffixes and suffix not in root.text_suffixes:
+            raise PermissionError(
+                f"Suffix '{suffix}' not allowed for sandbox_read_text in '{sandbox}'"
+            )
         text = target.read_text(encoding="utf-8")
         if len(text) > max_chars:
             raise ValueError("File exceeds max_chars")

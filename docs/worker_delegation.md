@@ -98,6 +98,12 @@ This enforces allowlists, file validation, sandbox security, and approval rules.
 
 **Attachment resolution.** When a worker passes `attachments` to `worker_call`, each entry must reference one of the caller's sandboxes (for example `attachments=["input/deck.pdf"]`). The runtime resolves the path inside that sandbox, blocks escape attempts, and re-applies the caller's `attachment_policy` (count, total bytes, suffix allow/deny) before forwarding the files to the callee. This keeps delegated attachments confined to data the caller already has permission to touch.
 
+Remember that `sandbox_read_text` is for UTF-8 text only. Configure `text_suffixes`
+on a sandbox to enumerate the safe file types. Binary files (PDF, images,
+spreadsheets) should go through `attachments`, not `sandbox_read_text`; combine
+that with `attachment_suffixes` to restrict which binaries can be shared with
+sub-workers.
+
 ### Model Selection
 
 Worker delegation resolves the model using this chain:

@@ -1,21 +1,22 @@
 name: worker_bootstrapper
 description: Turn free-form tasks into concrete multi-step workflows by designing workers and invoking them
-model: claude-haiku-4.5
+model: anthropic:claude-haiku-4-5
 
 sandboxes:
-  workspace:
-    path: .
+  input:
+    path: ./input
     mode: ro
-    allowed_suffixes:
-      - .pdf
+    text_suffixes:
       - .md
       - .txt
-      - .py
       - .yaml
       - .json
+      - .py
+    attachment_suffixes:
+      - .pdf
     max_bytes: 20000000  # 20MB
   output:
-    path: .
+    path: ./output
     mode: rw
     allowed_suffixes:
       - .yaml
@@ -46,20 +47,28 @@ instructions: |
   multi-step workflows by designing workers and then invoking them.
 
   Available tools:
-  - sandbox_list(sandbox_name, pattern) and sandbox_read_text(sandbox_name, path) for reading files
+  - sandbox_list(sandbox_name, pattern) for enumerating files in a sandbox
+  - sandbox_read_text(sandbox_name, path) for reading sandboxed files (UTF-8 text only)
   - sandbox_write_text(sandbox_name, path, content) for writing/creating files
   - worker_call(worker_name, input_data, attachments, extra_context) to call a
     named worker with its own fixed instructions and context
   - worker_create(name, description, instructions, output_schema_ref, model) to
     create a new worker definition
 
-  Both sandboxes point to the current directory. The "workspace" sandbox is read-only
-  for discovering files. The "output" sandbox is writable for saving results and templates.
+  Never use sandbox_read_text on binary files (PDFs, images, etc.). Instead,
+  pass those files as attachments when calling other workers so the LLM can
+  read them natively.
+
+  The "input" sandbox is read-only and points to ./input (expected to contain source files).
+  The "output" sandbox is write-only (rw for writing) and points to ./output for results/templates.
 
   Phases:
   1) **Bootstrap workers**: If no worker exists yet for the task, design one with
      worker_create() and save it. The worker will be created with minimal permissions
      and safe defaults. You provide the name, description, and instructions.
+     
+     **Note**: Created workers are automatically saved to `workers/generated/`.
+     You can immediately call them by name.
 
   2) **Invoke workers**: Use worker_call() to delegate a specific unit of work
      to a named worker. You supply worker_name, input_data, and any attachments or
@@ -72,15 +81,19 @@ instructions: |
   ## Workflow Pattern
 
   Typical workflow:
-  1. Identify the units of work using sandbox_list("workspace", pattern)
-  2. If no appropriate worker exists, create one with worker_create()
+  1. Identify the units of work using sandbox_list("input", pattern)
+  2. Use sandbox_read_text("input", path) only for text files (.md, .txt, .yaml,
+     .json, .py). For binary files like PDFs, skip reading and plan to pass them
+     as attachments instead.
+  3. If no appropriate worker exists, create one with worker_create()
      - Provide clear, focused instructions
      - Specify what inputs/attachments the worker expects
      - Define output format (markdown, JSON, etc.)
-  3. For each unit of work: call worker_call() with the worker name,
-     input data, relevant attachments, and any context fragments
-  4. Write consolidated results using sandbox_write_text("output", ...)
-  5. Report:
+  4. For each unit of work: call worker_call() with the worker name,
+     input data, relevant attachments (attach PDFs rather than reading them), and
+     any context fragments
+  5. Write consolidated results using sandbox_write_text("output", ...)
+  6. Report:
      - Units processed
      - Output location
      - Worker name/path for reuse
@@ -92,3 +105,19 @@ instructions: |
   - Write results to the output sandbox with clear filenames
   - Document the created worker name so it can be reused
   - Limit processing to max_units (if specified in input)
+
+  ## Few-Shot Examples
+
+  **Example 1: Summarizer**
+  Task: "Summarize all markdown files"
+  Created Worker:
+  - Name: `markdown_summarizer`
+  - Instructions: "You are a summarization specialist. Read the attached markdown file and provide a concise 3-sentence summary."
+  - Model: `anthropic:claude-haiku-4-5`
+
+  **Example 2: Code Reviewer**
+  Task: "Review python files for security issues"
+  Created Worker:
+  - Name: `security_reviewer`
+  - Instructions: "Analyze the attached Python code for security vulnerabilities (SQL injection, XSS, etc.). Report any findings in a bulleted list."
+  - Model: `anthropic:claude-sonnet-4`

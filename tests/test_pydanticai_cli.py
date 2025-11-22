@@ -80,6 +80,26 @@ def test_cli_accepts_json_input_instead_of_message(tmp_path, monkeypatch):
         assert call_kwargs["input_data"] == {"task": "analyze", "data": [1, 2, 3]}
 
 
+def test_cli_input_flag_accepts_plain_text(tmp_path, monkeypatch):
+    registry = WorkerRegistry(tmp_path)
+    registry.save_definition(WorkerDefinition(name="worker", instructions="demo"))
+
+    monkeypatch.chdir(tmp_path)
+
+    with patch("llm_do.cli.run_worker") as mock_run:
+        mock_run.return_value = WorkerRunResult(output="done")
+
+        main([
+            "worker",
+            "--input",
+            "process all files",
+            "--approve-all",
+        ])
+
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["input_data"] == "process all files"
+
+
 def test_cli_accepts_worker_name_with_explicit_registry(tmp_path):
     """Test traditional usage with worker name and --registry flag."""
     registry_dir = tmp_path / "workers"
