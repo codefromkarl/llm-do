@@ -1,39 +1,52 @@
-from __future__ import annotations
-
 import pytest
 
-from llm_do.tools_files import Files
+from llm_do.pydanticai import ApprovalController, SandboxConfig, SandboxManager, SandboxToolset
 
 
-def test_files_list_and_read_write(tmp_path):
-    sandbox = tmp_path / "sandbox"
-    sandbox.mkdir()
-    (sandbox / "one.txt").write_text("alpha", encoding="utf-8")
-    files = Files("ro:" + str(sandbox))
+def _make_toolset(root, *, mode="rw", allowed_suffixes=None, max_bytes=2_000_000):
+    cfg = SandboxConfig(
+        name="work",
+        path=root,
+        mode=mode,
+        allowed_suffixes=allowed_suffixes or [],
+        max_bytes=max_bytes,
+    )
+    manager = SandboxManager({"work": cfg})
+    approvals = ApprovalController({})
+    return manager, SandboxToolset(manager, approvals)
 
-    listing = files.list("*.txt")
-    assert listing == ["one.txt"]
 
-    content = files.read_text("one.txt")
-    assert content == "alpha"
+def test_sandbox_toolset_roundtrip(tmp_path):
+    manager, toolset = _make_toolset(tmp_path / "sandbox")
 
-    writer = Files({"mode": "out", "path": sandbox, "alias": "custom"})
-    message = writer.write_text("two.txt", "bravo")
+    message = toolset.write_text("work", "note.txt", "hello")
     assert "wrote" in message
-    assert (sandbox / "two.txt").read_text(encoding="utf-8") == "bravo"
+
+    listing = toolset.list("work")
+    assert listing == ["note.txt"]
+
+    assert toolset.read_text("work", "note.txt") == "hello"
 
 
-def test_files_prevent_escape(tmp_path):
-    sandbox = tmp_path / "sandbox"
-    sandbox.mkdir()
-    files = Files("ro:" + str(sandbox))
-    with pytest.raises(ValueError):
-        files.read_text("../secret.txt")
+def test_sandbox_manager_prevents_escape(tmp_path):
+    manager, toolset = _make_toolset(tmp_path / "sandbox")
+    (tmp_path / "sandbox" / "inside.txt").write_text("ok", encoding="utf-8")
 
-
-def test_files_write_in_read_only(tmp_path):
-    sandbox = tmp_path / "sandbox"
-    sandbox.mkdir()
-    files = Files("ro:" + str(sandbox))
     with pytest.raises(PermissionError):
-        files.write_text("blocked.txt", "oops")
+        toolset.read_text("work", "../outside.txt")
+
+    with pytest.raises(PermissionError):
+        manager.write_text("work", "../escape.txt", "nope")
+
+
+def test_sandbox_toolset_enforces_suffix_and_mode(tmp_path):
+    manager, toolset = _make_toolset(tmp_path / "sandbox", allowed_suffixes=[".txt"])
+    with pytest.raises(PermissionError):
+        toolset.write_text("work", "note.md", "oops")
+
+    ro_manager, ro_toolset = _make_toolset(tmp_path / "ro", mode="ro")
+    (tmp_path / "ro").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(PermissionError):
+        ro_toolset.write_text("work", "cant.txt", "blocked")
+
+

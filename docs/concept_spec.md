@@ -55,7 +55,8 @@ Workers can read/write files through explicitly configured sandboxes:
 Workers can invoke other workers with controlled inputs:
 - Allowlists restrict which workers can be called
 - Attachment validation (count, size, file extensions) happens before execution
-- Sub-workers use their own model and tools (no implicit inheritance)
+- Model inheritance follows a clear chain: worker definition → caller's model → CLI model → error
+- Tool access and allowlists are NOT inherited (each worker declares its own)
 - Results can be structured (validated JSON) or freeform text
 
 **Motivation**: Enable the two-step pattern (choose → act) and multi-stage workflows. Each worker has tight, focused context. Refining one worker doesn't require touching others.
@@ -112,7 +113,7 @@ Workers stay as the orchestration layer; Python handles deterministic operations
 
 3. **Security by construction**: Sandbox escapes, file size bombs, arbitrary code execution prevented by toolbox design, not LLM instruction-following. Created workers start with minimal permissions.
 
-4. **Explicit configuration**: Model selection, tool access, worker allowlists declared in definitions, not inherited or guessed
+4. **Explicit configuration**: Tool access and worker allowlists declared in definitions, not inherited. Model selection uses a well-defined fallback chain (worker definition → caller → CLI) for convenience while remaining predictable
 
 5. **Recursive composability**: Workers calling workers should feel like function calls, not template loading gymnastics. The architecture should make this natural.
 

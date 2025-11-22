@@ -1,24 +1,114 @@
-# Pitch deck evaluation demo
+# Pitch deck evaluation (PydanticAI workers)
 
-This directory shows how to build a workflow entirely out of templates and the
-`llm-do` toolboxes.
+This example demonstrates a clean multi-worker workflow for analyzing pitch deck PDFs:
 
-* `PROCEDURE.md` – canonical rubric shared with every sub-call (a copy also
-  lives at `pipeline/PROCEDURE.md` so the sandboxed tools can read it).
-* `pipeline/` – drop PDF pitch decks here (empty by default apart from the
-  procedure copy).
-* `evaluations/` – Markdown reports written here.
-* `templates/pitchdeck-single.yaml` – single-deck evaluator (JSON output).
-* `templates/pitchdeck-orchestrator.yaml` – orchestrates over every PDF.
+**Architecture:**
+- **Orchestrator** handles all I/O (listing PDFs, saving reports)
+- **Evaluator** focuses purely on analysis (receives PDF, returns markdown)
 
-Run it with:
+**Files:**
+- `workers/pitch_orchestrator.yaml` — Orchestrator worker definition
+- `workers/pitch_evaluator.yaml` — Evaluator worker definition
+- `prompts/pitch_orchestrator.txt` — Orchestrator instructions (I/O logic)
+- `prompts/pitch_evaluator.jinja2` — Evaluator instructions with rubric via `{{ file('PROCEDURE.md') }}`
+- `prompts/PROCEDURE.md` — Evaluation rubric (loaded by Jinja2)
+- `input/` — Drop PDF pitch decks here for evaluation
+- `evaluations/` — Generated markdown reports written here
+
+**Key design:**
+- PDFs are passed as **attachments** to the evaluator (LLM reads them natively)
+- Evaluator outputs **markdown directly** (no JSON conversion needed)
+- Orchestrator writes markdown reports to `evaluations/` directory
+
+## Prerequisites
+
+```bash
+pip install -e .            # from the repo root
+export ANTHROPIC_API_KEY=...  # or another model provider supported by PydanticAI
+```
+
+Both workers leave the `model` field unset so you can choose one at runtime.
+Any Claude, OpenAI, or Gemini model exposed through PydanticAI will work.
+
+## Run the workflow
+
+From the example directory:
 
 ```bash
 cd examples/pitchdeck_eval
-llm -t templates/pitchdeck-orchestrator.yaml \
-  "evaluate every pitch deck in pipeline/ using the procedure"
+llm-do pitch_orchestrator \
+  --model anthropic:claude-sonnet-4-20250514 \
+  --approve-all
 ```
 
-You can edit both templates in-place or point the orchestrator at another
-sub-template via the `lock_template` parameter. The template prints which files
-were processed and where the outputs were written.
+The worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
+
+Output will show rich formatted message traces including tool calls, file reads, and
+worker delegations.
+
+**Flags:**
+- `--approve-all`: Auto-approve file writes (recommended for this example)
+- `--json`: Output machine-readable JSON instead of rich formatted display
+- `--strict`: Reject all non-pre-approved tools (deny-by-default mode)
+
+**What happens:**
+
+1. Orchestrator lists `*.pdf` files in the `input` sandbox
+2. For each PDF:
+   - Orchestrator generates a slug from the filename
+   - Calls `worker_call(worker="pitch_evaluator", input_data={"deck_name": "..."}, attachments=["input/deck.pdf"])`
+   - Evaluator receives PDF as attachment and reads it natively (vision capabilities)
+   - Evaluator returns a complete markdown report
+3. Orchestrator writes each report to `evaluations/{slug}.md`
+4. CLI shows rich formatted message trace of the entire workflow
+
+**Why this design:**
+- **Native PDF reading**: LLM processes PDFs directly (no text extraction needed)
+- **Clean separation**: Orchestrator = I/O, Evaluator = analysis
+- **Simple output**: Markdown output (no JSON schema, no conversion logic)
+- **Attachments**: PDFs flow through the worker delegation system
+
+Open `evaluations/` afterwards to inspect the generated reports.
+
+## Customizing
+
+- **Add pitch decks**: Drop PDF files into `input/`. The LLM reads PDFs natively—
+  no conversion needed.
+- **Change rubric**: Edit `prompts/PROCEDURE.md` to change evaluation criteria.
+  The rubric is loaded into the evaluator's instructions via Jinja2.
+- **Adjust output format**: Edit `prompts/pitch_evaluator.jinja2` to change the
+  markdown structure.
+- **Tweak orchestrator logic**: Edit `prompts/pitch_orchestrator.txt` to change
+  file handling, naming, or processing order.
+- **Model selection**: Both workers inherit the model from CLI (`--model` flag).
+
+## Anatomy of the workers
+
+**`pitch_orchestrator`** demonstrates:
+- Multiple sandboxes (`input` read-only, `evaluations` writable)
+- `worker_call` with **attachments** parameter (passes PDF files)
+- `sandbox_write_text` for saving reports
+- Tight `allow_workers` list (only `pitch_evaluator` allowed)
+- File slug generation for consistent naming
+
+**`pitch_evaluator`** demonstrates:
+- **Attachment policy** (accepts 1 PDF, max 10MB)
+- **No sandboxes** (receives data via attachments, not file system)
+- Jinja2 template with `{{ file('config/PROCEDURE.md') }}` to load rubric
+- **Markdown output** (not JSON - simpler, more readable)
+- Native PDF reading via LLM vision capabilities
+
+Because both workers inherit `--model` from the CLI, the evaluator automatically
+uses a model with PDF/vision support when called by the orchestrator.
+
+## Resetting the example
+
+```bash
+rm -f evaluations/*.md
+```
+
+Add your own PDF pitch decks to `input/` and rerun the orchestrator to generate
+fresh evaluations.
+
+**Note**: You'll need a model with PDF/vision support (e.g., Claude 3.5 Sonnet,
+GPT-4 Turbo with Vision, Gemini 1.5 Pro) to process the PDFs natively.

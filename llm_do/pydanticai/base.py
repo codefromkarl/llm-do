@@ -3,7 +3,7 @@
 This module implements the initial slice described in
 ``docs/pydanticai_base_plan.md``. It provides:
 
-- Worker artifacts (definition/spec/profile) with YAML/JSON persistence via
+- Worker artifacts (definition/spec/defaults) with YAML/JSON persistence via
   ``WorkerRegistry``.
 - Runtime orchestration through ``run_worker`` using a pluggable agent runner
   (LLM integration can be layered on later).
@@ -16,62 +16,30 @@ core interfaces.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Type
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Type, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound, UndefinedError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic_ai import Agent
+from pydantic_ai.messages import BinaryContent, UserContent
+from pydantic_ai.models import Model as PydanticAIModel
+from pydantic_ai.tools import RunContext
+
+from .sandbox import (
+    AttachmentPolicy,
+    SandboxConfig,
+    SandboxManager,
+    SandboxToolset,
+)
 
 
 # ---------------------------------------------------------------------------
 # Worker artifact models
 # ---------------------------------------------------------------------------
-
-
-class AttachmentPolicy(BaseModel):
-    """Constraints for inbound attachments."""
-
-    max_attachments: int = 4
-    max_total_bytes: int = 10_000_000
-    allowed_suffixes: List[str] = Field(default_factory=list)
-    denied_suffixes: List[str] = Field(default_factory=list)
-
-    @field_validator("max_attachments")
-    @classmethod
-    def _positive_max_attachments(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("max_attachments must be non-negative")
-        return value
-
-    @field_validator("max_total_bytes")
-    @classmethod
-    def _positive_max_total_bytes(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("max_total_bytes must be positive")
-        return value
-
-    @field_validator("allowed_suffixes", "denied_suffixes")
-    @classmethod
-    def _lower_suffixes(cls, value: List[str]) -> List[str]:
-        return [suffix.lower() for suffix in value]
-
-    def validate_paths(self, attachments: Sequence[Path]) -> None:
-        if len(attachments) > self.max_attachments:
-            raise ValueError("Too many attachments provided")
-        total = 0
-        for path in attachments:
-            suffix = path.suffix.lower()
-            if self.allowed_suffixes and suffix not in self.allowed_suffixes:
-                raise ValueError(f"Attachment suffix '{suffix}' not allowed")
-            if self.denied_suffixes and suffix in self.denied_suffixes:
-                raise ValueError(f"Attachment suffix '{suffix}' is denied")
-            size = path.stat().st_size
-            total += size
-            if total > self.max_total_bytes:
-                raise ValueError("Attachments exceed max_total_bytes")
-
-
 class ToolRule(BaseModel):
     """Policy applied to a tool call."""
 
@@ -81,37 +49,12 @@ class ToolRule(BaseModel):
     description: Optional[str] = None
 
 
-class SandboxConfig(BaseModel):
-    """Configuration for a sandbox root."""
-
-    name: str
-    path: Path
-    mode: str = Field(default="ro", description="ro or rw")
-    allowed_suffixes: List[str] = Field(default_factory=list)
-    max_bytes: int = 2_000_000
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @field_validator("mode")
-    @classmethod
-    def _normalize_mode(cls, value: str) -> str:
-        normalized = value.lower()
-        if normalized not in {"ro", "rw"}:
-            raise ValueError("Sandbox mode must be 'ro' or 'rw'")
-        return normalized
-
-    @field_validator("allowed_suffixes")
-    @classmethod
-    def _lower_suffixes(cls, value: List[str]) -> List[str]:
-        return [suffix.lower() for suffix in value]
-
-
 class WorkerDefinition(BaseModel):
     """Persisted worker artifact."""
 
     name: str
     description: Optional[str] = None
-    instructions: str
+    instructions: Optional[str] = None  # Optional: can load from prompts/{name}.{txt,jinja2,j2,md}
     model: Optional[str] = None
     output_schema_ref: Optional[str] = None
     sandboxes: Dict[str, SandboxConfig] = Field(default_factory=dict)
@@ -131,12 +74,9 @@ class WorkerSpec(BaseModel):
     description: Optional[str] = None
     output_schema_ref: Optional[str] = None
     model: Optional[str] = None
-    kind: Optional[str] = Field(
-        default=None, description="Optional category (e.g., evaluator, orchestrator)."
-    )
 
 
-class WorkerCreationProfile(BaseModel):
+class WorkerCreationDefaults(BaseModel):
     """Host-configured defaults used when persisting workers."""
 
     default_model: Optional[str] = None
@@ -170,20 +110,48 @@ class WorkerCreationProfile(BaseModel):
         )
 
 
-class DeferredToolRequest(BaseModel):
-    """Represents a tool call that requires approval."""
+class ApprovalDecision(BaseModel):
+    """Decision from an approval prompt."""
 
-    tool_name: str
-    payload: Mapping[str, Any]
-    reason: Optional[str] = None
+    approved: bool
+    approve_for_session: bool = False
+    note: Optional[str] = None
+
+
+ApprovalCallback = Callable[[str, Mapping[str, Any], Optional[str]], ApprovalDecision]
+
+
+def _auto_approve_callback(
+    tool_name: str, payload: Mapping[str, Any], reason: Optional[str]
+) -> ApprovalDecision:
+    """Default callback that auto-approves all requests (for tests/non-interactive)."""
+    return ApprovalDecision(approved=True)
+
+
+def _strict_mode_callback(
+    tool_name: str, payload: Mapping[str, Any], reason: Optional[str]
+) -> ApprovalDecision:
+    """Callback that rejects all approval-required tools (strict/production mode).
+
+    Use with --strict flag to ensure only pre-approved tools execute.
+    Provides "deny by default" security posture.
+    """
+    return ApprovalDecision(
+        approved=False,
+        note=f"Strict mode: tool '{tool_name}' not pre-approved in worker config"
+    )
+
+
+# Public aliases for CLI use
+approve_all_callback = _auto_approve_callback
+strict_mode_callback = _strict_mode_callback
 
 
 class WorkerRunResult(BaseModel):
     """Structured result from a worker execution."""
 
     output: Any
-    deferred_requests: List[DeferredToolRequest] = Field(default_factory=list)
-    usage: Dict[str, Any] = Field(default_factory=dict)
+    messages: List[Any] = Field(default_factory=list)  # PydanticAI messages from agent run
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +164,99 @@ OutputSchemaResolver = Callable[[WorkerDefinition], Optional[Type[BaseModel]]]
 
 def _default_resolver(definition: WorkerDefinition) -> Optional[Type[BaseModel]]:
     return None
+
+
+ModelLike = Union[str, PydanticAIModel]
+
+
+def _load_prompt_file(worker_name: str, prompts_dir: Path) -> tuple[str, bool]:
+    """Load prompt by convention from prompts/ directory.
+
+    Looks for prompts/{worker_name}.{txt,jinja2,j2,md} in order.
+
+    Args:
+        worker_name: Name of the worker
+        prompts_dir: Path to prompts directory
+
+    Returns:
+        Tuple of (prompt_content, is_jinja_template)
+
+    Raises:
+        FileNotFoundError: If no prompt file found for worker
+    """
+    # Try extensions in order
+    for ext, is_jinja in [
+        (".jinja2", True),
+        (".j2", True),
+        (".txt", False),
+        (".md", False),
+    ]:
+        prompt_file = prompts_dir / f"{worker_name}{ext}"
+        if prompt_file.exists():
+            content = prompt_file.read_text(encoding="utf-8")
+            return (content, is_jinja)
+
+    raise FileNotFoundError(
+        f"No prompt file found for worker '{worker_name}' in {prompts_dir}. "
+        f"Expected: {worker_name}.{{txt,jinja2,j2,md}}"
+    )
+
+
+def _render_jinja_template(template_str: str, template_root: Path) -> str:
+    """Render a Jinja2 template with prompts/ directory as the base.
+
+    Provides a `file(path)` function that loads files relative to template_root.
+    Also supports standard {% include %} directive.
+
+    Args:
+        template_str: Jinja2 template string
+        template_root: Root directory for template file loading (prompts/ directory)
+
+    Returns:
+        Rendered template string
+
+    Raises:
+        FileNotFoundError: If a referenced file doesn't exist
+        PermissionError: If a file path escapes template root directory
+        jinja2.TemplateError: If template syntax is invalid
+    """
+
+    # Set up Jinja2 environment with prompts/ as base
+    env = Environment(
+        loader=FileSystemLoader(template_root),
+        autoescape=False,  # Don't escape - we want raw text
+        keep_trailing_newline=True,
+    )
+
+    # Add custom file() function
+    def load_file(path_str: str) -> str:
+        """Load a file relative to template root."""
+        file_path = (template_root / path_str).resolve()
+
+        # Security: ensure resolved path doesn't escape template root
+        try:
+            file_path.relative_to(template_root)
+        except ValueError:
+            raise PermissionError(
+                f"File path escapes allowed directory: {path_str}"
+            )
+
+        if not file_path.exists():
+            raise FileNotFoundError(
+                f"File not found: {path_str}"
+            )
+
+        return file_path.read_text(encoding="utf-8")
+
+    # Make file() available in templates
+    env.globals["file"] = load_file
+
+    # Render the template
+    try:
+        template = env.from_string(template_str)
+        return template.render()
+    except (TemplateNotFound, UndefinedError) as exc:
+        raise ValueError(f"Template error: {exc}") from exc
 
 
 class WorkerRegistry:
@@ -216,24 +277,65 @@ class WorkerRegistry:
         base = Path(name)
         if base.suffix:
             return base if base.is_absolute() else (self.root / base)
-        return self.root / f"{name}.yaml"
+
+        # Check workers/ subdirectory by convention
+        workers_path = self.root / "workers" / f"{name}.yaml"
+        return workers_path
 
     def _load_raw(self, path: Path) -> Dict[str, Any]:
+        suffix = path.suffix.lower()
+        if suffix not in {".yaml", ".yml"}:
+            raise ValueError(
+                f"Worker definition must be .yaml or .yml, got: {suffix}"
+            )
         content = path.read_text(encoding="utf-8")
-        if path.suffix.lower() in {".yaml", ".yml"}:
-            return yaml.safe_load(content) or {}
-        return yaml.safe_load(content) if path.suffix.lower() == ".json" else {}
+        return yaml.safe_load(content) or {}
 
     def load_definition(self, name: str) -> WorkerDefinition:
         path = self._definition_path(name)
         if not path.exists():
-            # try JSON fallback
-            alt = path.with_suffix(".json")
-            if alt.exists():
-                path = alt
-            else:
-                raise FileNotFoundError(f"Worker definition not found: {name}")
+            raise FileNotFoundError(f"Worker definition not found: {name}")
         data = self._load_raw(path)
+
+        # Determine project root: if worker is in workers/ subdirectory, go up one level
+        # This allows both flat structure (worker.yaml, prompts/) and nested (workers/, prompts/)
+        project_root = path.parent
+        if project_root.name == "workers":
+            project_root = project_root.parent
+
+        prompts_dir = project_root / "prompts"
+
+        if "instructions" not in data or data["instructions"] is None:
+            # No inline instructions - discover from prompts/ directory
+            if prompts_dir.exists():
+                worker_name = data.get("name", name)
+                prompt_content, is_jinja = _load_prompt_file(worker_name, prompts_dir)
+                if is_jinja:
+                    # Jinja2 root is prompts/ directory
+                    data["instructions"] = _render_jinja_template(prompt_content, prompts_dir)
+                else:
+                    data["instructions"] = prompt_content
+            # If no prompts/ directory exists and no inline instructions, let validation handle it
+        elif isinstance(data["instructions"], str):
+            # Inline instructions exist - check if they contain Jinja2 syntax and render
+            # Simple heuristic: if contains {{ or {%, assume it's a template
+            instructions_str = data["instructions"]
+            if "{{" in instructions_str or "{%" in instructions_str:
+                # Jinja2 root is prompts/ directory
+                data["instructions"] = _render_jinja_template(instructions_str, prompts_dir)
+
+        # Inject sandbox names from dictionary keys
+        if "sandboxes" in data and isinstance(data["sandboxes"], dict):
+            for sandbox_name, sandbox_config in data["sandboxes"].items():
+                if isinstance(sandbox_config, dict) and "name" not in sandbox_config:
+                    sandbox_config["name"] = sandbox_name
+
+        # Inject tool rule names from dictionary keys
+        if "tool_rules" in data and isinstance(data["tool_rules"], dict):
+            for rule_name, rule_config in data["tool_rules"].items():
+                if isinstance(rule_config, dict) and "name" not in rule_config:
+                    rule_config["name"] = rule_name
+
         try:
             return WorkerDefinition.model_validate(data)
         except ValidationError as exc:
@@ -266,93 +368,27 @@ class WorkerRegistry:
         return self.output_schema_resolver(definition)
 
 
-# ---------------------------------------------------------------------------
-# Sandbox + tools
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SandboxRoot:
-    name: str
-    path: Path
-    read_only: bool
-    allowed_suffixes: List[str]
-    max_bytes: int
-
-    def resolve(self, relative: str) -> Path:
-        relative = relative.lstrip("/")
-        candidate = (self.path / relative).resolve()
-        try:
-            candidate.relative_to(self.path)
-        except ValueError as exc:
-            raise PermissionError("Path escapes sandbox root") from exc
-        return candidate
-
-
-class SandboxManager:
-    """Manage sandboxed filesystem access for a worker."""
-
-    def __init__(self, sandboxes: Mapping[str, SandboxConfig]):
-        self.sandboxes: Dict[str, SandboxRoot] = {}
-        for name, cfg in sandboxes.items():
-            root = Path(cfg.path).expanduser().resolve()
-            root.mkdir(parents=True, exist_ok=True)
-            self.sandboxes[name] = SandboxRoot(
-                name=name,
-                path=root,
-                read_only=cfg.mode == "ro",
-                allowed_suffixes=list(cfg.allowed_suffixes),
-                max_bytes=cfg.max_bytes,
-            )
-
-    def _sandbox_for(self, sandbox: str) -> SandboxRoot:
-        if sandbox not in self.sandboxes:
-            raise KeyError(f"Unknown sandbox '{sandbox}'")
-        return self.sandboxes[sandbox]
-
-    def list_files(self, sandbox: str, pattern: str = "**/*") -> List[str]:
-        root = self._sandbox_for(sandbox)
-        matches: List[str] = []
-        for path in root.path.glob(pattern):
-            try:
-                rel = path.relative_to(root.path)
-            except ValueError:
-                continue
-            matches.append(str(rel))
-        return sorted(matches)
-
-    def read_text(self, sandbox: str, path: str, *, max_chars: int = 200_000) -> str:
-        root = self._sandbox_for(sandbox)
-        target = root.resolve(path)
-        if not target.exists() or not target.is_file():
-            raise FileNotFoundError(path)
-        text = target.read_text(encoding="utf-8")
-        if len(text) > max_chars:
-            raise ValueError("File exceeds max_chars")
-        return text
-
-    def write_text(self, sandbox: str, path: str, content: str) -> str:
-        root = self._sandbox_for(sandbox)
-        if root.read_only:
-            raise PermissionError("Sandbox is read-only")
-        target = root.resolve(path)
-        suffix = target.suffix.lower()
-        if root.allowed_suffixes and suffix not in root.allowed_suffixes:
-            raise PermissionError(f"Suffix '{suffix}' not allowed in sandbox '{sandbox}'")
-        if len(content.encode("utf-8")) > root.max_bytes:
-            raise ValueError("Content exceeds sandbox max_bytes")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        rel = target.relative_to(root.path)
-        return f"wrote {len(content)} chars to {sandbox}:{rel}"
-
-
 class ApprovalController:
-    """Apply tool rules and record deferred requests."""
+    """Apply tool rules with blocking approval prompts."""
 
-    def __init__(self, tool_rules: Mapping[str, ToolRule], *, requests: List[DeferredToolRequest]):
+    def __init__(
+        self,
+        tool_rules: Mapping[str, ToolRule],
+        *,
+        approval_callback: ApprovalCallback = _auto_approve_callback,
+    ):
         self.tool_rules = tool_rules
-        self.requests = requests
+        self.approval_callback = approval_callback
+        self.session_approvals: set[tuple[str, frozenset]] = set()
+
+    def _make_approval_key(self, tool_name: str, payload: Mapping[str, Any]) -> tuple[str, frozenset]:
+        """Create a hashable key for session approval tracking."""
+        try:
+            items = frozenset(payload.items())
+        except TypeError:
+            # If payload has unhashable values, use repr as fallback
+            items = frozenset((k, repr(v)) for k, v in payload.items())
+        return (tool_name, items)
 
     def maybe_run(
         self,
@@ -365,41 +401,30 @@ class ApprovalController:
             if not rule.allowed:
                 raise PermissionError(f"Tool '{tool_name}' is disallowed")
             if rule.approval_required:
-                self.requests.append(
-                    DeferredToolRequest(
-                        tool_name=tool_name,
-                        payload=dict(payload),
-                        reason=rule.description,
-                    )
-                )
-                return None
+                # Check session approvals
+                key = self._make_approval_key(tool_name, payload)
+                if key in self.session_approvals:
+                    return func()
+
+                # Block and wait for approval
+                decision = self.approval_callback(tool_name, payload, rule.description)
+                if not decision.approved:
+                    note = f": {decision.note}" if decision.note else ""
+                    raise PermissionError(f"User rejected tool call '{tool_name}'{note}")
+
+                # Track session approval if requested
+                if decision.approve_for_session:
+                    self.session_approvals.add(key)
+
         return func()
-
-
-class SandboxToolset:
-    """Filesystem helpers exposed to agents."""
-
-    def __init__(self, manager: SandboxManager, approvals: ApprovalController):
-        self.manager = manager
-        self.approvals = approvals
-
-    def list(self, sandbox: str, pattern: str = "**/*") -> List[str]:
-        return self.manager.list_files(sandbox, pattern)
-
-    def read_text(self, sandbox: str, path: str, *, max_chars: int = 200_000) -> str:
-        return self.manager.read_text(sandbox, path, max_chars=max_chars)
-
-    def write_text(self, sandbox: str, path: str, content: str) -> Optional[str]:
-        return self.approvals.maybe_run(
-            "sandbox.write",
-            {"sandbox": sandbox, "path": path},
-            lambda: self.manager.write_text(sandbox, path, content),
-        )
 
 
 # ---------------------------------------------------------------------------
 # Runtime context and operations
 # ---------------------------------------------------------------------------
+
+
+MessageCallback = Callable[[List[Any]], None]
 
 
 @dataclass
@@ -408,13 +433,146 @@ class WorkerContext:
     worker: WorkerDefinition
     sandbox_manager: SandboxManager
     sandbox_toolset: SandboxToolset
-    creation_profile: WorkerCreationProfile
-    effective_model: Optional[str]
+    creation_defaults: WorkerCreationDefaults
+    effective_model: Optional[ModelLike]
+    approval_controller: ApprovalController
     attachments: List[Path] = field(default_factory=list)
-    caller_effective_model: Optional[str] = None
+    message_callback: Optional[MessageCallback] = None
 
 
 AgentRunner = Callable[[WorkerDefinition, Any, WorkerContext, Optional[Type[BaseModel]]], Any]
+
+
+def _format_user_prompt(user_input: Any) -> str:
+    """Serialize user input into a prompt string for the agent."""
+
+    if isinstance(user_input, str):
+        return user_input
+    return json.dumps(user_input, indent=2, sort_keys=True)
+
+
+def _register_worker_tools(agent: Agent) -> None:
+    """Expose built-in llm-do helpers as PydanticAI tools."""
+
+    @agent.tool(name="sandbox_list", description="List files within a sandbox using a glob pattern")
+    def sandbox_list(
+        ctx: RunContext[WorkerContext],
+        sandbox: str,
+        pattern: str = "**/*",
+    ) -> List[str]:
+        return ctx.deps.sandbox_toolset.list(sandbox, pattern)
+
+    @agent.tool(name="sandbox_read_text", description="Read UTF-8 text from a sandboxed file")
+    def sandbox_read_text(
+        ctx: RunContext[WorkerContext],
+        sandbox: str,
+        path: str,
+        *,
+        max_chars: int = 200_000,
+    ) -> str:
+        return ctx.deps.sandbox_toolset.read_text(sandbox, path, max_chars=max_chars)
+
+    @agent.tool(name="sandbox_write_text", description="Write UTF-8 text to a sandboxed file")
+    def sandbox_write_text(
+        ctx: RunContext[WorkerContext],
+        sandbox: str,
+        path: str,
+        content: str,
+    ) -> Optional[str]:
+        return ctx.deps.sandbox_toolset.write_text(sandbox, path, content)
+
+    @agent.tool(name="worker_call", description="Delegate to another registered worker")
+    def worker_call_tool(
+        ctx: RunContext[WorkerContext],
+        worker: str,
+        input_data: Any = None,
+        attachments: Optional[List[str]] = None,
+    ) -> Any:
+        return _worker_call_tool(
+            ctx.deps,
+            worker=worker,
+            input_data=input_data,
+            attachments=attachments,
+        )
+
+    @agent.tool(name="worker_create", description="Persist a new worker definition using the active profile")
+    def worker_create_tool(
+        ctx: RunContext[WorkerContext],
+        name: str,
+        instructions: str,
+        description: Optional[str] = None,
+        model: Optional[str] = None,
+        output_schema_ref: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        return _worker_create_tool(
+            ctx.deps,
+            name=name,
+            instructions=instructions,
+            description=description,
+            model=model,
+            output_schema_ref=output_schema_ref,
+            force=force,
+        )
+
+
+def _worker_call_tool(
+    ctx: WorkerContext,
+    *,
+    worker: str,
+    input_data: Any = None,
+    attachments: Optional[List[str]] = None,
+) -> Any:
+    def _invoke() -> Any:
+        resolved = [Path(path).expanduser().resolve() for path in attachments or []]
+        result = call_worker(
+            registry=ctx.registry,
+            worker=worker,
+            input_data=input_data,
+            caller_context=ctx,
+            attachments=resolved or None,
+        )
+        return result.output
+
+    return ctx.approval_controller.maybe_run(
+        "worker.call",
+        {"worker": worker},
+        _invoke,
+    )
+
+
+def _worker_create_tool(
+    ctx: WorkerContext,
+    *,
+    name: str,
+    instructions: str,
+    description: Optional[str] = None,
+    model: Optional[str] = None,
+    output_schema_ref: Optional[str] = None,
+    force: bool = False,
+) -> Dict[str, Any]:
+    spec = WorkerSpec(
+        name=name,
+        instructions=instructions,
+        description=description,
+        model=model,
+        output_schema_ref=output_schema_ref,
+    )
+
+    def _invoke() -> Dict[str, Any]:
+        created = create_worker(
+            registry=ctx.registry,
+            spec=spec,
+            defaults=ctx.creation_defaults,
+            force=force,
+        )
+        return created.model_dump(mode="json")
+
+    return ctx.approval_controller.maybe_run(
+        "worker.create",
+        {"worker": name},
+        _invoke,
+    )
 
 
 def _default_agent_runner(
@@ -422,21 +580,73 @@ def _default_agent_runner(
     user_input: Any,
     context: WorkerContext,
     output_model: Optional[Type[BaseModel]],
-) -> Any:
-    """A placeholder agent runner for tests and bootstrapping.
+) -> tuple[Any, List[Any]]:
+    """Execute a worker via a PydanticAI agent using the worker context.
 
-    The runner simply echoes back the requested input and worker name. Real
-    integrations should replace this with a PydanticAI Agent invocation.
+    Args:
+        definition: Worker definition with instructions and configuration
+        user_input: Input data for the worker
+        context: Worker execution context with tools and dependencies (includes message_callback)
+        output_model: Optional Pydantic model for structured output
+
+    Returns:
+        Tuple of (output, messages) where messages is the list of all messages
+        exchanged with the LLM during execution.
     """
 
-    payload = {
-        "worker": definition.name,
-        "input": user_input,
-        "model": context.effective_model,
-    }
-    if output_model:
-        return output_model.model_validate(payload)
-    return payload
+    if context.effective_model is None:
+        raise ValueError(
+            f"No model configured for worker '{definition.name}'. "
+            "Set worker.model, pass --model, or provide a custom agent_runner."
+        )
+
+    agent_kwargs: Dict[str, Any] = dict(
+        model=context.effective_model,
+        instructions=definition.instructions,
+        name=definition.name,
+        deps_type=WorkerContext,
+    )
+    if output_model is not None:
+        agent_kwargs["output_type"] = output_model
+
+    agent = Agent(**agent_kwargs)
+    _register_worker_tools(agent)
+
+    # Build user prompt with attachments
+    prompt_text = _format_user_prompt(user_input)
+
+    if context.attachments:
+        # Create a list of UserContent with text + file attachments
+        # UserContent = str | BinaryContent | ImageUrl | AudioUrl | ...
+        user_content: List[Union[str, BinaryContent]] = [prompt_text]
+        for attachment_path in context.attachments:
+            binary_content = BinaryContent.from_path(attachment_path)
+            user_content.append(binary_content)
+        prompt = user_content
+    else:
+        # Just text, no attachments
+        prompt = prompt_text
+
+    event_handler = None
+    if context.message_callback:
+        async def _stream_handler(
+            run_ctx: RunContext[WorkerContext], event_stream
+        ) -> None:  # pragma: no cover - exercised indirectly via integration tests
+            async for event in event_stream:
+                context.message_callback([{"worker": definition.name, "event": event}])
+
+        event_handler = _stream_handler
+
+    run_result = agent.run_sync(
+        prompt,
+        deps=context,
+        event_stream_handler=event_handler,
+    )
+
+    # Extract all messages from the result
+    messages = run_result.all_messages() if hasattr(run_result, 'all_messages') else []
+
+    return (run_result.output, messages)
 
 
 # worker delegation ---------------------------------------------------------
@@ -449,7 +659,7 @@ def call_worker(
     caller_context: WorkerContext,
     attachments: Optional[List[Path]] = None,
     agent_runner: AgentRunner = _default_agent_runner,
-) -> WorkerRunResult:
+    ) -> WorkerRunResult:
     allowed = caller_context.worker.allow_workers
     if allowed and worker not in allowed:
         raise PermissionError(f"Delegation to '{worker}' is not allowed")
@@ -459,8 +669,9 @@ def call_worker(
         input_data=input_data,
         caller_effective_model=caller_context.effective_model,
         attachments=attachments,
-        creation_profile=caller_context.creation_profile,
+        creation_defaults=caller_context.creation_defaults,
         agent_runner=agent_runner,
+        message_callback=caller_context.message_callback,
     )
 
 
@@ -470,10 +681,10 @@ def create_worker(
     registry: WorkerRegistry,
     spec: WorkerSpec,
     *,
-    profile: WorkerCreationProfile,
+    defaults: WorkerCreationDefaults,
     force: bool = False,
 ) -> WorkerDefinition:
-    definition = profile.expand_spec(spec)
+    definition = defaults.expand_spec(spec)
     registry.save_definition(definition, force=force)
     return definition
 
@@ -486,15 +697,17 @@ def run_worker(
     worker: str,
     input_data: Any,
     attachments: Optional[List[Path]] = None,
-    caller_effective_model: Optional[str] = None,
-    cli_model: Optional[str] = None,
-    creation_profile: Optional[WorkerCreationProfile] = None,
+    caller_effective_model: Optional[ModelLike] = None,
+    cli_model: Optional[ModelLike] = None,
+    creation_defaults: Optional[WorkerCreationDefaults] = None,
     agent_runner: AgentRunner = _default_agent_runner,
+    approval_callback: ApprovalCallback = _auto_approve_callback,
+    message_callback: Optional[MessageCallback] = None,
 ) -> WorkerRunResult:
     definition = registry.load_definition(worker)
 
-    profile = creation_profile or WorkerCreationProfile()
-    sandbox_manager = SandboxManager(definition.sandboxes or profile.default_sandboxes)
+    defaults = creation_defaults or WorkerCreationDefaults()
+    sandbox_manager = SandboxManager(definition.sandboxes or defaults.default_sandboxes)
 
     attachment_policy = definition.attachment_policy
     attachment_list = [Path(path).expanduser().resolve() for path in attachments or []]
@@ -502,8 +715,7 @@ def run_worker(
 
     effective_model = definition.model or caller_effective_model or cli_model
 
-    deferred: List[DeferredToolRequest] = []
-    approvals = ApprovalController(definition.tool_rules, requests=deferred)
+    approvals = ApprovalController(definition.tool_rules, approval_callback=approval_callback)
     sandbox_tools = SandboxToolset(sandbox_manager, approvals)
 
     context = WorkerContext(
@@ -511,10 +723,11 @@ def run_worker(
         worker=definition,
         sandbox_manager=sandbox_manager,
         sandbox_toolset=sandbox_tools,
-        creation_profile=profile,
+        creation_defaults=defaults,
         effective_model=effective_model,
         attachments=attachment_list,
-        caller_effective_model=caller_effective_model,
+        approval_controller=approvals,
+        message_callback=message_callback,
     )
 
     output_model = registry.resolve_output_schema(definition)
@@ -522,28 +735,38 @@ def run_worker(
     # Real agent integration would expose toolsets to the model here. The base
     # implementation simply forwards to the agent runner with the constructed
     # context.
-    raw_output = agent_runner(definition, input_data, context, output_model)
+    result = agent_runner(definition, input_data, context, output_model)
+
+    # Handle both old-style (output only) and new-style (output, messages) returns
+    if isinstance(result, tuple) and len(result) == 2:
+        raw_output, messages = result
+    else:
+        raw_output = result
+        messages = []
 
     if output_model is not None:
         output = output_model.model_validate(raw_output)
     else:
         output = raw_output
 
-    return WorkerRunResult(output=output, deferred_requests=deferred, usage={})
+    return WorkerRunResult(output=output, messages=messages)
 
 
 __all__: Iterable[str] = [
     "AgentRunner",
+    "ApprovalCallback",
     "ApprovalController",
+    "ApprovalDecision",
+    "approve_all_callback",
+    "strict_mode_callback",
     "AttachmentPolicy",
     "ToolRule",
     "SandboxConfig",
     "WorkerDefinition",
     "WorkerSpec",
-    "WorkerCreationProfile",
+    "WorkerCreationDefaults",
     "WorkerRegistry",
     "WorkerRunResult",
-    "DeferredToolRequest",
     "run_worker",
     "call_worker",
     "create_worker",
