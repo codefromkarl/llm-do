@@ -44,6 +44,9 @@ from .base import (
 from .cli_display import (
     display_initial_request,
     display_messages,
+    display_streaming_model_response,
+    display_streaming_tool_call,
+    display_streaming_tool_result,
     render_json_or_text,
     stringify_user_input,
 )
@@ -139,34 +142,6 @@ def _build_interactive_approval_callback(
 def _build_streaming_callback(console: Console):
     """Create a callback that prints streaming events as they arrive."""
 
-    def _print_tool_call(worker: str, part: ToolCallPart) -> None:
-        console.print()
-        console.print(Panel(
-            render_json_or_text(part.args),
-            title=f"[bold blue]{worker} ▷ Tool Call: {part.tool_name}[/bold blue]",
-            border_style="blue",
-        ))
-
-    def _print_tool_result(worker: str, result: ToolReturnPart | RetryPromptPart) -> None:
-        console.print()
-        if isinstance(result, ToolReturnPart):
-            body = render_json_or_text(result.content)
-            title = f"[bold yellow]{worker} ◁ Tool Result: {result.tool_name}[/bold yellow]"
-        else:
-            body = Text(result.instructions or "Retry requested", style="yellow")
-            title = f"[bold yellow]{worker} ◁ Tool Retry[/bold yellow]"
-        console.print(Panel(body, title=title, border_style="yellow"))
-
-    def _print_model_response(worker: str, text: str) -> None:
-        if not text.strip():
-            return
-        console.print()
-        console.print(Panel(
-            text,
-            title=f"[bold magenta]{worker} ▷ Model Response[/bold magenta]",
-            border_style="magenta",
-        ))
-
     def _callback(events: list[Any]) -> None:
         for payload in events:
             if isinstance(payload, dict):
@@ -182,11 +157,11 @@ def _build_streaming_callback(console: Console):
             if isinstance(event, PartEndEvent):
                 part = event.part
                 if isinstance(part, TextPart):
-                    _print_model_response(worker, part.content)
+                    display_streaming_model_response(console, worker, part.content)
             elif isinstance(event, FunctionToolCallEvent):
-                _print_tool_call(worker, event.part)
+                display_streaming_tool_call(console, worker, event.part)
             elif isinstance(event, FunctionToolResultEvent):
-                _print_tool_result(worker, event.result)
+                display_streaming_tool_result(console, worker, event.result)
 
         console.file.flush()
 

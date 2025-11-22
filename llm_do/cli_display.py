@@ -14,6 +14,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ToolCallPart,
@@ -143,3 +144,41 @@ def display_initial_request(
         instructions=definition.instructions,
     )
     display_messages([request], console)
+
+
+def display_streaming_tool_call(console: Console, worker: str, part: ToolCallPart) -> None:
+    """Display a tool call during streaming execution."""
+    console.print()
+    console.print(Panel(
+        render_json_or_text(part.args),
+        title=f"[bold blue]{worker} ▷ Tool Call: {part.tool_name}[/bold blue]",
+        border_style="blue",
+    ))
+
+
+def display_streaming_tool_result(
+    console: Console, worker: str, result: ToolReturnPart | RetryPromptPart
+) -> None:
+    """Display a tool result during streaming execution."""
+    console.print()
+    if isinstance(result, ToolReturnPart):
+        body = render_json_or_text(result.content)
+        title = f"[bold yellow]{worker} ◁ Tool Result: {result.tool_name}[/bold yellow]"
+    else:
+        # RetryPromptPart uses 'content' field
+        content = result.content if isinstance(result.content, str) else str(result.content)
+        body = Text(content or "Retry requested", style="yellow")
+        title = f"[bold yellow]{worker} ◁ Tool Retry[/bold yellow]"
+    console.print(Panel(body, title=title, border_style="yellow"))
+
+
+def display_streaming_model_response(console: Console, worker: str, text: str) -> None:
+    """Display a model response during streaming execution."""
+    if not text.strip():
+        return
+    console.print()
+    console.print(Panel(
+        text,
+        title=f"[bold magenta]{worker} ▷ Model Response[/bold magenta]",
+        border_style="magenta",
+    ))

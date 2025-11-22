@@ -213,7 +213,7 @@ def test_streaming_callback_renders_tool_results(monkeypatch):
     )
 
     mock_render = Mock(return_value=Text("rendered"))
-    monkeypatch.setattr("llm_do.cli.render_json_or_text", mock_render)
+    monkeypatch.setattr("llm_do.cli_display.render_json_or_text", mock_render)
 
     callback = _build_streaming_callback(console)
 

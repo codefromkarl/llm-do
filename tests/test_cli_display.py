@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -16,6 +17,9 @@ from rich.text import Text
 
 from llm_do.cli_display import (
     display_messages,
+    display_streaming_model_response,
+    display_streaming_tool_call,
+    display_streaming_tool_result,
     render_json_or_text,
     stringify_user_input,
 )
@@ -159,3 +163,76 @@ def test_display_messages_with_attachments():
     output = console.export_text()
     assert "Check this file" in output
     assert "2 attachment(s)" in output
+
+
+def test_display_streaming_tool_call():
+    """Streaming tool call should display worker, tool name, and args."""
+    console = Console(record=True)
+    part = ToolCallPart(
+        tool_name="read_file",
+        args={"path": "/test.txt", "max_chars": 1000}
+    )
+
+    display_streaming_tool_call(console, "my_worker", part)
+
+    output = console.export_text()
+    assert "Tool Call" in output
+    assert "my_worker" in output
+    assert "read_file" in output
+    assert "/test.txt" in output
+
+
+def test_display_streaming_tool_result():
+    """Streaming tool result should display worker and result content."""
+    console = Console(record=True)
+    result = ToolReturnPart(
+        tool_name="read_file",
+        content={"status": "success", "lines": 42},
+        tool_call_id="call_123"
+    )
+
+    display_streaming_tool_result(console, "my_worker", result)
+
+    output = console.export_text()
+    assert "Tool Result" in output
+    assert "my_worker" in output
+    assert "read_file" in output
+    assert "success" in output
+
+
+def test_display_streaming_tool_result_with_retry():
+    """Streaming retry should display retry message."""
+    console = Console(record=True)
+    result = RetryPromptPart(
+        content="Please try again with different parameters"
+    )
+
+    display_streaming_tool_result(console, "my_worker", result)
+
+    output = console.export_text()
+    assert "Tool Retry" in output
+    assert "my_worker" in output
+    assert "Please try again" in output
+
+
+def test_display_streaming_model_response():
+    """Streaming model response should display worker and text."""
+    console = Console(record=True)
+
+    display_streaming_model_response(console, "my_worker", "Hello from the model!")
+
+    output = console.export_text()
+    assert "Model Response" in output
+    assert "my_worker" in output
+    assert "Hello from the model!" in output
+
+
+def test_display_streaming_model_response_empty():
+    """Streaming model response with empty text should not print anything."""
+    console = Console(record=True)
+
+    display_streaming_model_response(console, "my_worker", "   ")
+
+    output = console.export_text()
+    # Should be empty since whitespace-only text is skipped
+    assert output.strip() == ""
