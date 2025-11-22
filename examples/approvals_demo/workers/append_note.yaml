@@ -1,0 +1,29 @@
+name: append_note
+description: Append timestamped notes to a shared log file using sandboxed writes.
+sandboxes:
+  notes:
+    path: ./notes
+    mode: rw
+    allowed_suffixes:
+      - .txt
+      - .log
+    max_bytes: 100000
+allow_workers: []
+tool_rules:
+  sandbox.write:
+    name: sandbox.write
+    approval_required: true
+    description: Writing to notes log requires explicit approval.
+instructions: |
+  You maintain a running log of notes in the `notes` sandbox.
+
+  Steps:
+  1. Read the incoming note from `input_data.note`. If missing, default to
+     "(no note provided)".
+  2. Build a string in the format: `YYYY-MM-DD HH:MM • {note}`.
+  3. Append the string to `notes/activity.log` using `sandbox_write_text` with a
+     leading newline so entries stay separated.
+  4. Return the message you wrote so the caller can confirm.
+
+  Only the `sandbox_write_text` tool can modify files, and it requires approval
+  from the CLI operator.

@@ -9,7 +9,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, UserError
 from pydantic_ai.messages import (
@@ -33,12 +33,34 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from .base import (
+    ApprovalCallback,
+    ApprovalDecision,
     WorkerCreationDefaults,
     WorkerRegistry,
     run_worker,
     approve_all_callback,
     strict_mode_callback,
 )
+
+
+def _format_jsonish(value: Any) -> str:
+    """Best-effort pretty-printer for payload dictionaries."""
+
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, indent=2, sort_keys=True)
+    except TypeError:
+        return repr(value)
+
+
+def _is_interactive_terminal() -> bool:
+    """Return True when both stdin and stdout are connected to a TTY."""
+
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        return False
 
 
 def _load_jsonish(value: str) -> Any:
@@ -179,16 +201,64 @@ def _display_initial_request(
     _display_messages([request], console)
 
 
+def _build_interactive_approval_callback(
+    console: Console,
+    *,
+    worker_name: str,
+) -> ApprovalCallback:
+    """Return a callback that prompts the user before running gated tools."""
+
+    def _prompt_choice() -> str:
+        response = console.input(
+            "[bold cyan]Approval choice [a/s/d/q][/bold cyan]: "
+        )
+        return response.strip().lower()
+
+    def _callback(
+        tool_name: str, payload: Mapping[str, Any], reason: Optional[str]
+    ):
+        payload_text = _format_jsonish(payload)
+        reason_text = reason or "Approval required"
+        body = Text()
+        body.append(f"Reason: {reason_text}\n\n", style="bold red")
+        body.append("Payload:\n", style="bold")
+        body.append(payload_text)
+        console.print()
+        console.print(
+            Panel(
+                body,
+                title=f"[bold red]{worker_name} ▷ Tool approval: {tool_name}[/bold red]",
+                border_style="red",
+            )
+        )
+
+        options = Text()
+        options.append("[a] Approve and continue\n", style="green")
+        options.append("[s] Approve for remainder of session\n", style="green")
+        options.append("[d] Deny and abort\n", style="red")
+        options.append("[q] Quit run", style="red")
+        console.print(Panel(options, title="Approval choices", border_style="cyan"))
+
+        while True:
+            choice = _prompt_choice()
+            if choice in {"", "a"}:
+                return ApprovalDecision(approved=True)
+            if choice == "s":
+                return ApprovalDecision(approved=True, approve_for_session=True)
+            if choice == "d":
+                return ApprovalDecision(
+                    approved=False, note="Rejected via interactive CLI"
+                )
+            if choice == "q":
+                raise KeyboardInterrupt
+
+            console.print("Unknown choice. Use a/s/d/q.", style="yellow")
+
+    return _callback
+
+
 def _build_streaming_callback(console: Console):
     """Create a callback that prints streaming events as they arrive."""
-
-    def _format_jsonish(value: Any) -> str:
-        if isinstance(value, str):
-            return value
-        try:
-            return json.dumps(value, indent=2)
-        except Exception:  # pragma: no cover - defensive
-            return str(value)
 
     def _print_tool_call(worker: str, part: ToolCallPart) -> None:
         console.print()
@@ -325,6 +395,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
     console = Console()
+    prompt_console = console if not args.json else Console(stderr=True)
 
     try:
         # Determine worker name and registry
@@ -378,9 +449,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         elif args.strict:
             approval_callback = strict_mode_callback
         else:
-            # Default: interactive approval (would need implementation)
-            # For now, default to approve_all to match previous behavior
-            approval_callback = approve_all_callback
+            if not _is_interactive_terminal():
+                print(
+                    "Error: interactive approvals require a TTY. Use --approve-all or --strict for non-interactive runs.",
+                    file=sys.stderr,
+                )
+                return 1
+            approval_callback = _build_interactive_approval_callback(
+                prompt_console, worker_name=worker_name
+            )
 
         streaming_callback = None if args.json else _build_streaming_callback(console)
 
@@ -451,6 +528,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Error: {e}", file=sys.stderr)
         if args.debug:
             raise
+        return 1
+
+    except KeyboardInterrupt:
+        print("Aborted by user", file=sys.stderr)
         return 1
 
     except Exception as e:
