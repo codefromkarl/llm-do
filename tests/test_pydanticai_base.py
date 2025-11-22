@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart
+from pydantic_ai.messages import BinaryContent, ModelRequest, ModelResponse, TextPart
 from pydantic_ai.models import Model
 
 from llm_do import (
@@ -61,7 +61,7 @@ class RecordingModel(Model):
                     if isinstance(content, str):
                         parts.append(content)
                     else:
-                        parts.append(json.dumps(content))
+                        parts.append(str(content))
                 prompt = "\n\n".join(parts)
                 break
         self.last_prompt = prompt or ""
@@ -423,6 +423,35 @@ def test_default_agent_runner_uses_pydantic_ai(registry):
         "worker_call",
         "worker_create",
     ]
+
+
+def test_default_runner_emits_request_preview(tmp_path, registry):
+    definition = WorkerDefinition(name="preview-worker", instructions="State input")
+    registry.save_definition(definition)
+
+    attachment = tmp_path / "doc.txt"
+    attachment.write_text("hi", encoding="utf-8")
+
+    events: list[Any] = []
+
+    def callback(payload):
+        events.extend(payload)
+
+    model = RecordingModel()
+    run_worker(
+        registry=registry,
+        worker="preview-worker",
+        input_data="Hello",
+        cli_model=model,
+        attachments=[str(attachment)],
+        message_callback=callback,
+    )
+
+    preview_events = [event for event in events if "initial_request" in event]
+    assert preview_events, "expected initial request event"
+    preview = preview_events[0]["initial_request"]
+    assert preview["user_input"] == "Hello"
+    assert preview["attachments"] == [str(attachment)]
 
 
 def test_run_worker_without_model_errors(registry):

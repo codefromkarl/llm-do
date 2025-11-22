@@ -110,7 +110,7 @@ def test_call_worker_forwards_attachments(tmp_path):
     seen_paths: list[Path] = []
 
     def runner(defn, _input, ctx, _schema):
-        seen_paths.extend(ctx.attachments)
+        seen_paths.extend(att.path for att in ctx.attachments)
         return {"worker": defn.name}
 
     context = _parent_context(registry, parent)
@@ -234,7 +234,10 @@ def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
     )
 
     assert result == {"status": "ok"}
-    assert captured["attachments"] == [attachment.resolve()]
+    delegated = captured["attachments"]
+    assert len(delegated) == 1
+    assert delegated[0].path == attachment.resolve()
+    assert delegated[0].display_name == "input/deck.pdf"
 
 
 def test_worker_call_tool_rejects_disallowed_sandbox_attachment(tmp_path):

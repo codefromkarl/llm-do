@@ -42,13 +42,11 @@ from .base import (
     strict_mode_callback,
 )
 from .cli_display import (
-    display_initial_request,
-    display_messages,
+    display_worker_request,
     display_streaming_model_response,
     display_streaming_tool_call,
     display_streaming_tool_result,
     render_json_or_text,
-    stringify_user_input,
 )
 
 
@@ -155,6 +153,10 @@ def _build_streaming_callback(console: Console):
         for payload in events:
             if isinstance(payload, dict):
                 worker = str(payload.get("worker", "worker"))
+                preview = payload.get("initial_request")
+                if preview is not None:
+                    display_worker_request(console, worker, preview)
+                    continue
                 event = payload.get("event")
             else:
                 worker = "worker"
@@ -284,16 +286,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         creation_defaults = _load_creation_defaults(args.creation_defaults_path)
 
         # Show the outgoing request immediately in rich mode
-        preview_definition = None
         if not args.json:
-            preview_definition = registry.load_definition(worker_name)
             console.print("\n[bold white]═══ Message Exchange ═══[/bold white]\n")
-            display_initial_request(
-                definition=preview_definition,
-                user_input=input_data,
-                attachments=args.attachments,
-                console=console,
-            )
 
         # Determine approval callback based on flags
         if args.approve_all and args.strict:

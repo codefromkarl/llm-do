@@ -5,12 +5,9 @@ All functions use Rich for terminal formatting.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping
 
 from pydantic_ai.messages import (
-    BinaryContent,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -110,42 +107,6 @@ def display_messages(messages: list[ModelMessage], console: Console) -> None:
                     ))
 
 
-def stringify_user_input(user_input: Any) -> str:
-    """Convert arbitrary input data to displayable text."""
-    if isinstance(user_input, str):
-        return user_input
-    return json.dumps(user_input, indent=2, sort_keys=True)
-
-
-def display_initial_request(
-    *,
-    definition: Any,  # WorkerDefinition - avoiding circular import
-    user_input: Any,
-    attachments: Optional[list[str]],
-    console: Console,
-) -> None:
-    """Render the outgoing message sent to the LLM before streaming starts."""
-    prompt_text = stringify_user_input(user_input)
-    user_content: Any
-    if attachments:
-        user_content = [prompt_text]
-        for attachment in attachments:
-            placeholder = BinaryContent(
-                data=b"",
-                media_type="application/octet-stream",
-                identifier=Path(attachment).name,
-            )
-            user_content.append(placeholder)
-    else:
-        user_content = prompt_text
-
-    request = ModelRequest(
-        parts=[UserPromptPart(content=user_content)],
-        instructions=definition.instructions,
-    )
-    display_messages([request], console)
-
-
 def display_streaming_tool_call(console: Console, worker: str, part: ToolCallPart) -> None:
     """Display a tool call during streaming execution."""
     console.print()
@@ -182,3 +143,42 @@ def display_streaming_model_response(console: Console, worker: str, text: str) -
         title=f"[bold magenta]{worker} ▷ Model Response[/bold magenta]",
         border_style="magenta",
     ))
+
+
+def display_worker_request(
+    console: Console,
+    worker: str,
+    preview: Mapping[str, Any],
+) -> None:
+    """Display the initial request sent to a worker (instructions + user input)."""
+
+    console.print()
+    instructions = preview.get("instructions") or ""
+    if instructions.strip():
+        console.print(
+            Panel(
+                instructions,
+                title=f"[bold cyan]{worker} ▷ System Instructions[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+    user_input = preview.get("user_input") or ""
+    attachments = preview.get("attachments") or []
+    body_sections: list[str] = []
+    if user_input.strip():
+        body_sections.append(user_input)
+    if attachments:
+        attachment_lines = "\n".join(f"- {name}" for name in attachments)
+        body_sections.append(f"[dim]Attachments:\n{attachment_lines}[/dim]")
+
+    if not body_sections:
+        body_sections.append("[dim](no user input)[/dim]")
+
+    console.print(
+        Panel(
+            "\n\n".join(body_sections),
+            title=f"[bold green]{worker} ▷ User Input[/bold green]",
+            border_style="green",
+        )
+    )

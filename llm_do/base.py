@@ -345,6 +345,17 @@ MessageCallback = Callable[[List[Any]], None]
 
 
 @dataclass
+class AttachmentPayload:
+    """Attachment path plus a display-friendly label."""
+
+    path: Path
+    display_name: str
+
+
+AttachmentInput = Union[str, Path, AttachmentPayload]
+
+
+@dataclass
 class WorkerContext:
     registry: WorkerRegistry
     worker: WorkerDefinition
@@ -353,7 +364,7 @@ class WorkerContext:
     creation_defaults: WorkerCreationDefaults
     effective_model: Optional[ModelLike]
     approval_controller: ApprovalController
-    attachments: List[Path] = field(default_factory=list)
+    attachments: List[AttachmentPayload] = field(default_factory=list)
     message_callback: Optional[MessageCallback] = None
 
     def validate_attachments(
@@ -430,6 +441,23 @@ class WorkerContext:
 
 
 AgentRunner = Callable[[WorkerDefinition, Any, WorkerContext, Optional[Type[BaseModel]]], Any]
+
+
+def _model_supports_streaming(model: ModelLike) -> bool:
+    """Return True if the configured model supports streaming callbacks."""
+
+    if isinstance(model, str):
+        # Assume vendor-provided identifiers support streaming
+        return True
+
+    # When the caller passes a Model subclass, only opt into streaming if the
+    # subclass overrides request_stream. Comparing attribute identity avoids
+    # invoking the method (which could raise NotImplementedError).
+    base_stream = getattr(PydanticAIModel, "request_stream", None)
+    model_stream = getattr(type(model), "request_stream", None)
+    if base_stream is None or model_stream is None:
+        return False
+    return model_stream is not base_stream
 
 
 def _format_user_prompt(user_input: Any) -> str:
@@ -519,13 +547,23 @@ def _worker_call_tool(
     else:
         resolved_attachments, attachment_metadata = ([], [])
 
+    attachment_payloads: Optional[List[AttachmentPayload]] = None
+    if resolved_attachments:
+        attachment_payloads = [
+            AttachmentPayload(
+                path=path,
+                display_name=f"{meta['sandbox']}/{meta['path']}",
+            )
+            for path, meta in zip(resolved_attachments, attachment_metadata)
+        ]
+
     def _invoke() -> Any:
         result = call_worker(
             registry=ctx.registry,
             worker=worker,
             input_data=input_data,
             caller_context=ctx,
-            attachments=resolved_attachments or None,
+            attachments=attachment_payloads,
         )
         return result.output
 
@@ -614,12 +652,14 @@ def _default_agent_runner(
     # Build user prompt with attachments
     prompt_text = _format_user_prompt(user_input)
 
+    attachment_labels = [item.display_name for item in context.attachments]
+
     if context.attachments:
         # Create a list of UserContent with text + file attachments
         # UserContent = str | BinaryContent | ImageUrl | AudioUrl | ...
         user_content: List[Union[str, BinaryContent]] = [prompt_text]
-        for attachment_path in context.attachments:
-            binary_content = BinaryContent.from_path(attachment_path)
+        for attachment in context.attachments:
+            binary_content = BinaryContent.from_path(attachment.path)
             user_content.append(binary_content)
         prompt = user_content
     else:
@@ -628,13 +668,25 @@ def _default_agent_runner(
 
     event_handler = None
     if context.message_callback:
-        async def _stream_handler(
-            run_ctx: RunContext[WorkerContext], event_stream
-        ) -> None:  # pragma: no cover - exercised indirectly via integration tests
-            async for event in event_stream:
-                context.message_callback([{"worker": definition.name, "event": event}])
+        preview = {
+            "instructions": definition.instructions or "",
+            "user_input": prompt_text,
+            "attachments": attachment_labels,
+        }
+        context.message_callback(
+            [{"worker": definition.name, "initial_request": preview}]
+        )
 
-        event_handler = _stream_handler
+        if _model_supports_streaming(context.effective_model):
+            async def _stream_handler(
+                run_ctx: RunContext[WorkerContext], event_stream
+            ) -> None:  # pragma: no cover - exercised indirectly via integration tests
+                async for event in event_stream:
+                    context.message_callback(
+                        [{"worker": definition.name, "event": event}]
+                    )
+
+            event_handler = _stream_handler
 
     run_result = agent.run_sync(
         prompt,
@@ -656,7 +708,7 @@ def call_worker(
     input_data: Any,
     *,
     caller_context: WorkerContext,
-    attachments: Optional[List[Path]] = None,
+    attachments: Optional[Sequence[AttachmentInput]] = None,
     agent_runner: AgentRunner = _default_agent_runner,
     ) -> WorkerRunResult:
     allowed = caller_context.worker.allow_workers
@@ -701,7 +753,7 @@ def run_worker(
     registry: WorkerRegistry,
     worker: str,
     input_data: Any,
-    attachments: Optional[List[Path]] = None,
+    attachments: Optional[Sequence[AttachmentInput]] = None,
     caller_effective_model: Optional[ModelLike] = None,
     cli_model: Optional[ModelLike] = None,
     creation_defaults: Optional[WorkerCreationDefaults] = None,
@@ -715,8 +767,21 @@ def run_worker(
     sandbox_manager = SandboxManager(definition.sandboxes or defaults.default_sandboxes)
 
     attachment_policy = definition.attachment_policy
-    attachment_list = [Path(path).expanduser().resolve() for path in attachments or []]
-    attachment_policy.validate_paths(attachment_list)
+
+    attachment_payloads: List[AttachmentPayload] = []
+    if attachments:
+        for item in attachments:
+            if isinstance(item, AttachmentPayload):
+                attachment_payloads.append(item)
+                continue
+
+            display_name = str(item)
+            path = Path(item).expanduser().resolve()
+            attachment_payloads.append(
+                AttachmentPayload(path=path, display_name=display_name)
+            )
+
+    attachment_policy.validate_paths([payload.path for payload in attachment_payloads])
 
     effective_model = definition.model or caller_effective_model or cli_model
 
@@ -730,7 +795,7 @@ def run_worker(
         sandbox_toolset=sandbox_tools,
         creation_defaults=defaults,
         effective_model=effective_model,
-        attachments=attachment_list,
+        attachments=attachment_payloads,
         approval_controller=approvals,
         message_callback=message_callback,
     )
@@ -759,6 +824,7 @@ def run_worker(
 
 __all__: Iterable[str] = [
     "AgentRunner",
+    "AttachmentPayload",
     "ApprovalCallback",
     "ApprovalController",
     "ApprovalDecision",

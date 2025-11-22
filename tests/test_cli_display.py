@@ -1,5 +1,4 @@
 """Tests for cli_display module."""
-import json
 from pathlib import Path
 
 from pydantic_ai.messages import (
@@ -20,8 +19,8 @@ from llm_do.cli_display import (
     display_streaming_model_response,
     display_streaming_tool_call,
     display_streaming_tool_result,
+    display_worker_request,
     render_json_or_text,
-    stringify_user_input,
 )
 
 
@@ -52,25 +51,39 @@ def test_render_json_or_text_with_non_serializable():
     assert "test" in str(result).lower()
 
 
-def test_stringify_user_input_with_string():
-    """Plain strings should be returned as-is."""
-    assert stringify_user_input("hello") == "hello"
+def test_display_worker_request_shows_details():
+    """Request preview should include worker name, instructions, and attachments."""
+    console = Console(record=True)
+    preview = {
+        "instructions": "Follow the rubric",
+        "user_input": "Evaluate decks",
+        "attachments": ["input/deck.pdf", "input/brief.pdf"],
+    }
+
+    display_worker_request(console, "pitch_orchestrator", preview)
+
+    output = console.export_text()
+    assert "pitch_orchestrator" in output
+    assert "System Instructions" in output
+    assert "Evaluate decks" in output
+    assert "Attachments" in output
+    assert "input/deck.pdf" in output
 
 
-def test_stringify_user_input_with_dict():
-    """Dicts should be JSON-serialized."""
-    result = stringify_user_input({"task": "test", "count": 42})
-    parsed = json.loads(result)
-    assert parsed == {"task": "test", "count": 42}
-    # Should be pretty-printed
-    assert "\n" in result
+def test_display_worker_request_handles_empty_input():
+    """Request preview should show placeholder for empty input."""
+    console = Console(record=True)
+    preview = {
+        "instructions": None,
+        "user_input": "",
+        "attachments": [],
+    }
 
+    display_worker_request(console, "child_worker", preview)
 
-def test_stringify_user_input_with_list():
-    """Lists should be JSON-serialized."""
-    result = stringify_user_input([1, 2, 3])
-    parsed = json.loads(result)
-    assert parsed == [1, 2, 3]
+    output = console.export_text()
+    assert "child_worker" in output
+    assert "(no user input)" in output
 
 
 def test_display_messages_with_model_request():
