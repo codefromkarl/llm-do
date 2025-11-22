@@ -31,10 +31,18 @@ From the example directory:
 cd examples/pitchdeck_eval
 llm-do pitch_orchestrator \
   --model anthropic:claude-sonnet-4-20250514 \
-  --pretty
+  --approve-all
 ```
 
 The worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
+
+Output will show rich formatted message traces including tool calls, file reads, and
+worker delegations.
+
+**Flags:**
+- `--approve-all`: Auto-approve file writes (recommended for this example)
+- `--json`: Output machine-readable JSON instead of rich formatted display
+- `--strict`: Reject all non-pre-approved tools (deny-by-default mode)
 
 What happens:
 

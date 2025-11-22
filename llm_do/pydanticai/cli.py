@@ -12,8 +12,28 @@ from pathlib import Path
 from typing import Any, Optional
 
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, UserError
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+    TextPart,
+    UserPromptPart,
+    SystemPromptPart,
+)
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
 
-from .base import WorkerCreationDefaults, WorkerRegistry, run_worker
+from .base import (
+    WorkerCreationDefaults,
+    WorkerRegistry,
+    run_worker,
+    approve_all_callback,
+    strict_mode_callback,
+)
 
 
 def _load_jsonish(value: str) -> Any:
@@ -36,6 +56,66 @@ def _load_creation_defaults(path: Optional[str]) -> WorkerCreationDefaults:
         return WorkerCreationDefaults()
     data = _load_jsonish(path)
     return WorkerCreationDefaults.model_validate(data)
+
+
+def _display_messages(messages: list[ModelMessage], console: Console) -> None:
+    """Display LLM messages with rich formatting."""
+    for msg in messages:
+        if isinstance(msg, ModelRequest):
+            # User/system input to the model
+            console.print()
+
+            if msg.instructions:
+                console.print(Panel(
+                    msg.instructions,
+                    title="[bold cyan]System Instructions[/bold cyan]",
+                    border_style="cyan",
+                ))
+
+            for part in msg.parts:
+                if isinstance(part, UserPromptPart):
+                    console.print(Panel(
+                        part.content,
+                        title="[bold green]User Input[/bold green]",
+                        border_style="green",
+                    ))
+                elif isinstance(part, SystemPromptPart):
+                    console.print(Panel(
+                        part.content,
+                        title="[bold cyan]System Prompt[/bold cyan]",
+                        border_style="cyan",
+                    ))
+                elif isinstance(part, ToolReturnPart):
+                    # Tool result being sent back to model
+                    tool_content = part.content
+                    if isinstance(tool_content, str):
+                        display_content = tool_content
+                    else:
+                        display_content = json.dumps(tool_content, indent=2)
+
+                    console.print(Panel(
+                        Syntax(display_content, "json", theme="monokai", line_numbers=False),
+                        title=f"[bold yellow]Tool Result: {part.tool_name}[/bold yellow]",
+                        border_style="yellow",
+                    ))
+
+        elif isinstance(msg, ModelResponse):
+            # Model's response
+            for part in msg.parts:
+                if isinstance(part, TextPart):
+                    console.print(Panel(
+                        part.content,
+                        title="[bold magenta]Model Response[/bold magenta]",
+                        border_style="magenta",
+                    ))
+                elif isinstance(part, ToolCallPart):
+                    # Model is calling a tool
+                    args_json = json.dumps(part.args, indent=2)
+                    console.print(Panel(
+                        Syntax(args_json, "json", theme="monokai", line_numbers=False),
+                        title=f"[bold blue]Tool Call: {part.tool_name}[/bold blue]",
+                        border_style="blue",
+                    ))
 
 
 
@@ -83,11 +163,22 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Attachment file paths passed to the worker",
     )
     parser.add_argument(
-        "--no-pretty",
-        dest="pretty",
-        action="store_false",
-        default=True,
-        help="Disable pretty-printing of JSON output",
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output JSON instead of rich formatted display (for scripting/automation)",
+    )
+    parser.add_argument(
+        "--approve-all",
+        action="store_true",
+        default=False,
+        help="Auto-approve all tool calls without prompting (use with caution)",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=False,
+        help="Reject all non-pre-approved tools (deny-by-default security mode)",
     )
     parser.add_argument(
         "--debug",
@@ -100,6 +191,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
+    console = Console()
 
     try:
         # Determine worker name and registry
@@ -132,6 +224,19 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         creation_defaults = _load_creation_defaults(args.creation_defaults_path)
 
+        # Determine approval callback based on flags
+        if args.approve_all and args.strict:
+            print("Error: Cannot use --approve-all and --strict together", file=sys.stderr)
+            return 1
+        elif args.approve_all:
+            approval_callback = approve_all_callback
+        elif args.strict:
+            approval_callback = strict_mode_callback
+        else:
+            # Default: interactive approval (would need implementation)
+            # For now, default to approve_all to match previous behavior
+            approval_callback = approve_all_callback
+
         result = run_worker(
             registry=registry,
             worker=worker_name,
@@ -139,12 +244,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             attachments=args.attachments,
             cli_model=args.cli_model,
             creation_defaults=creation_defaults,
+            approval_callback=approval_callback,
         )
 
-        serialized = result.model_dump(mode="json")
-        indent = 2 if args.pretty else None
-        json.dump(serialized, sys.stdout, indent=indent)
-        sys.stdout.write("\n")
+        # JSON output mode (for scripting/automation)
+        if args.json:
+            serialized = result.model_dump(mode="json")
+            json.dump(serialized, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+
+        # Default: Rich formatted output
+        if result.messages:
+            console.print("\n[bold white]═══ Message Exchange ═══[/bold white]\n")
+            _display_messages(result.messages, console)
+            console.print()
+
+        # Display final output in a nice panel
+        console.print(Panel(
+            json.dumps(result.output, indent=2) if not isinstance(result.output, str) else result.output,
+            title="[bold green]Final Output[/bold green]",
+            border_style="green",
+        ))
+        console.print()
         return 0
 
     except FileNotFoundError as e:

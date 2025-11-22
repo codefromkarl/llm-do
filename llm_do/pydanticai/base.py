@@ -213,6 +213,7 @@ class WorkerRunResult(BaseModel):
     """Structured result from a worker execution."""
 
     output: Any
+    messages: List[Any] = Field(default_factory=list)  # PydanticAI messages from agent run
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +393,18 @@ class WorkerRegistry:
             if "{{" in instructions_str or "{%" in instructions_str:
                 # Jinja2 root is project_root (where config/, prompts/ live)
                 data["instructions"] = _render_jinja_template(instructions_str, project_root)
+
+        # Inject sandbox names from dictionary keys
+        if "sandboxes" in data and isinstance(data["sandboxes"], dict):
+            for sandbox_name, sandbox_config in data["sandboxes"].items():
+                if isinstance(sandbox_config, dict) and "name" not in sandbox_config:
+                    sandbox_config["name"] = sandbox_name
+
+        # Inject tool rule names from dictionary keys
+        if "tool_rules" in data and isinstance(data["tool_rules"], dict):
+            for rule_name, rule_config in data["tool_rules"].items():
+                if isinstance(rule_config, dict) and "name" not in rule_config:
+                    rule_config["name"] = rule_name
 
         try:
             return WorkerDefinition.model_validate(data)
@@ -735,8 +748,13 @@ def _default_agent_runner(
     user_input: Any,
     context: WorkerContext,
     output_model: Optional[Type[BaseModel]],
-) -> Any:
-    """Execute a worker via a PydanticAI agent using the worker context."""
+) -> tuple[Any, List[Any]]:
+    """Execute a worker via a PydanticAI agent using the worker context.
+
+    Returns:
+        Tuple of (output, messages) where messages is the list of all messages
+        exchanged with the LLM during execution.
+    """
 
     if context.effective_model is None:
         raise ValueError(
@@ -758,7 +776,11 @@ def _default_agent_runner(
 
     prompt = _format_user_prompt(user_input)
     run_result = agent.run_sync(prompt, deps=context)
-    return run_result.output
+
+    # Extract messages from the result
+    messages = run_result.all_messages() if hasattr(run_result, 'all_messages') else []
+
+    return (run_result.output, messages)
 
 
 # worker delegation ---------------------------------------------------------
@@ -844,14 +866,21 @@ def run_worker(
     # Real agent integration would expose toolsets to the model here. The base
     # implementation simply forwards to the agent runner with the constructed
     # context.
-    raw_output = agent_runner(definition, input_data, context, output_model)
+    result = agent_runner(definition, input_data, context, output_model)
+
+    # Handle both old-style (output only) and new-style (output, messages) returns
+    if isinstance(result, tuple) and len(result) == 2:
+        raw_output, messages = result
+    else:
+        raw_output = result
+        messages = []
 
     if output_model is not None:
         output = output_model.model_validate(raw_output)
     else:
         output = raw_output
 
-    return WorkerRunResult(output=output)
+    return WorkerRunResult(output=output, messages=messages)
 
 
 __all__: Iterable[str] = [

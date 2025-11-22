@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.7",
     "PyYAML",
     "jinja2>=3.0",
+    "rich>=13.0",
 ]
 
 [project.scripts]

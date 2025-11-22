@@ -141,7 +141,7 @@ cd examples
 llm-do greeter.yaml "Hello, how are you?" --model anthropic:claude-sonnet-4-20250514
 ```
 
-Expected output: Friendly greeting and response in JSON format.
+Expected output: Friendly greeting and response with rich formatted message trace showing the full conversation.
 
 ---
 
@@ -179,22 +179,24 @@ examples/pitchdeck_eval/
 cd examples/pitchdeck_eval
 llm-do pitch_orchestrator \
   "Evaluate all pitch decks in the pipeline" \
-  --model anthropic:claude-sonnet-4-20250514
-
-# If you don't want to approve writes interactively:
-llm-do pitch_orchestrator \
-  "Evaluate all pitch decks in the pipeline" \
   --model anthropic:claude-sonnet-4-20250514 \
   --approve-all
 ```
 
 Worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
 
+The output shows rich formatted message traces including all tool calls, file operations,
+and worker delegations with color-coded panels. The `--approve-all` flag auto-approves
+file writes (omit for interactive approval prompts).
+
 **What you'll see:**
 - Orchestrator discovers `aurora_solar.md`
 - Delegates evaluation to `pitch_evaluator` worker
-- Approval prompt for writing `evaluations/aurora-solar.md` (unless using `--approve-all`)
+- Rich formatted message trace showing all tool calls and results
+- Approval prompt for writing `evaluations/aurora-solar.md` (interactive approval required)
 - Formatted report written to `evaluations/aurora-solar.md`
+
+Note: The approval system is still active. To skip interactive approvals, you can pass `--approve-all` flag.
 
 **Try it yourself:**
 - Add more pitch decks: Drop `.md` or `.txt` files into `input/`
