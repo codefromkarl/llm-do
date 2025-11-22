@@ -1,6 +1,6 @@
 import pytest
 
-from llm_do.pydanticai import ApprovalController, SandboxConfig, SandboxManager, SandboxToolset
+from llm_do import ApprovalController, SandboxConfig, SandboxManager, SandboxToolset
 
 
 def _make_toolset(root, *, mode="rw", allowed_suffixes=None, max_bytes=2_000_000):

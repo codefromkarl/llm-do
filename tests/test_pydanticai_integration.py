@@ -13,7 +13,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 
-from llm_do.pydanticai import (
+from llm_do import (
     ApprovalDecision,
     SandboxConfig,
     ToolRule,

@@ -1,7 +1,48 @@
-"""Core runtime package for llm-do."""
-
+"""PydanticAI-based runtime for llm-do workers."""
 from __future__ import annotations
 
-__all__ = ["__version__"]
+from .base import (
+    AgentRunner,
+    ApprovalCallback,
+    ApprovalController,
+    ApprovalDecision,
+    ToolRule,
+    WorkerContext,
+    WorkerCreationDefaults,
+    WorkerDefinition,
+    WorkerRegistry,
+    WorkerRunResult,
+    WorkerSpec,
+    approve_all_callback,
+    call_worker,
+    create_worker,
+    run_worker,
+    strict_mode_callback,
+)
+from .sandbox import AttachmentPolicy, SandboxConfig, SandboxManager, SandboxToolset
+
+__all__ = [
+    "AgentRunner",
+    "ApprovalCallback",
+    "ApprovalController",
+    "ApprovalDecision",
+    "approve_all_callback",
+    "strict_mode_callback",
+    "AttachmentPolicy",
+    "SandboxConfig",
+    "SandboxManager",
+    "SandboxToolset",
+    "ToolRule",
+    "WorkerContext",
+    "WorkerCreationDefaults",
+    "WorkerDefinition",
+    "WorkerRegistry",
+    "WorkerRunResult",
+    "WorkerSpec",
+    "call_worker",
+    "create_worker",
+    "run_worker",
+    "__version__",
+]
 
 __version__ = "0.2.0"

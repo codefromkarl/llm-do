@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-llm-do = "llm_do.pydanticai.cli:main"
+llm-do = "llm_do.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/llm-do"

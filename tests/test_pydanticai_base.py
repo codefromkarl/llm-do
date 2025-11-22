@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart
 from pydantic_ai.models import Model
 
-from llm_do.pydanticai import (
+from llm_do import (
     ApprovalCallback,
     ApprovalController,
     ApprovalDecision,
@@ -327,7 +327,7 @@ def test_run_worker_without_model_errors(registry):
 
 def test_approve_all_callback_mode(tmp_path, registry):
     """Test Story 6: --approve-all flag auto-approves all tools."""
-    from llm_do.pydanticai import approve_all_callback
+    from llm_do import approve_all_callback
 
     sandbox_path = tmp_path / "out"
     sandbox_cfg = SandboxConfig(
@@ -366,7 +366,7 @@ def test_approve_all_callback_mode(tmp_path, registry):
 
 def test_strict_mode_callback_rejects(tmp_path, registry):
     """Test Story 7: --strict flag rejects all non-preapproved tools."""
-    from llm_do.pydanticai import strict_mode_callback
+    from llm_do import strict_mode_callback
 
     sandbox_path = tmp_path / "out"
     sandbox_cfg = SandboxConfig(
