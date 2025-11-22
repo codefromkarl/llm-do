@@ -9,3 +9,7 @@
 ## Docs & guidance
 
 - [ ] Expand AGENTS/README with a short “Worker authoring checklist”.
+
+## Bootstrapper
+
+- [ ] Implement automatic iterative refinement: bootstrapper should read the created worker, call it, evaluate output, and refine the definition if needed.
