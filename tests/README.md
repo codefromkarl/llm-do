@@ -13,16 +13,14 @@ This guide documents the testing strategies and patterns used in llm-do. The cod
 ### Example Integration Tests
 
 `tests/test_examples.py` exercises the example projects end-to-end (copying
-directories, writing sandbox files, etc.). These tests are opt-in because they
-take noticeably longer and touch the filesystem more aggressively.
+directories, writing sandbox files, etc.). They now run as part of the normal
+suite, so expect a bit more filesystem churn.
 
-Run them explicitly when needed:
+To focus on these tests only, use the marker:
 
 ```bash
-pytest tests/test_examples.py --run-example-tests
+pytest -m examples
 ```
-
-Without the flag the entire module is skipped.
 
 ## Using PydanticAI's TestModel
 

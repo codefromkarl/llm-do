@@ -7,21 +7,10 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 
-def pytest_addoption(parser):
-    """Register custom CLI flags for the test suite."""
-
-    parser.addoption(
-        "--run-example-tests",
-        action="store_true",
-        default=False,
-        help="Execute slow example integration tests (tests/test_examples.py)",
-    )
-
-
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "examples: integration tests for example workers (requires --run-example-tests)",
+        "examples: integration tests for example workers",
     )
 
 

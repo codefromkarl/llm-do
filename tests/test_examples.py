@@ -41,12 +41,6 @@ from llm_do import (
 pytestmark = pytest.mark.examples
 
 
-@pytest.fixture(autouse=True)
-def _skip_examples_unless_requested(pytestconfig):
-    if not pytestconfig.getoption("--run-example-tests"):
-        pytest.skip("example integration tests require --run-example-tests")
-
-
 class ToolCallingModel(Model):
     """Mock model that makes predefined tool calls.
 
@@ -124,15 +118,10 @@ def _copy_example_directory(example_name: str, tmp_path: Path) -> Path:
 
 @pytest.fixture
 def greeter_registry(tmp_path):
-    """Registry for the greeter example worker.
+    """Registry for the greeter example worker."""
 
-    Note: greeter has no sandboxes, so CWD doesn't matter for path resolution.
-    """
-    # Copy examples/ directory which contains workers/greeter.yaml
-    source = Path(__file__).parent.parent / "examples"
-    dest = tmp_path / "examples"
-    shutil.copytree(source, dest)
-    return WorkerRegistry(dest)
+    example_path = _copy_example_directory("greeter", tmp_path)
+    return WorkerRegistry(example_path)
 
 
 @pytest.fixture
@@ -472,8 +461,8 @@ def test_all_example_workers_load_successfully():
     """
     examples_dir = Path(__file__).parent.parent / "examples"
 
-    # Greeter (in examples/workers/greeter.yaml)
-    greeter_registry = WorkerRegistry(examples_dir)
+    # Greeter (in examples/greeter/workers/greeter.yaml)
+    greeter_registry = WorkerRegistry(examples_dir / "greeter")
     greeter_def = greeter_registry.load_definition("greeter")
     assert greeter_def.name == "greeter"
     assert greeter_def.description is not None
