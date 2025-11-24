@@ -14,6 +14,7 @@ agent runners and approval callbacks.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from time import perf_counter
@@ -33,6 +34,8 @@ from .sandbox import (
     SandboxManager,
     SandboxToolset,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +479,6 @@ def _prepare_agent_execution(
     Returns:
         AgentExecutionContext with all prepared state for agent execution
     """
-    import sys
-
     if context.effective_model is None:
         raise ValueError(
             f"No model configured for worker '{definition.name}'. "
@@ -490,20 +491,10 @@ def _prepare_agent_execution(
 
     if context.attachments:
         # Create a list of UserContent with text + file attachments
-        print(f"DEBUG: Processing {len(context.attachments)} attachments", file=sys.stderr)
-        sys.stderr.flush()
         user_content: List[Union[str, BinaryContent]] = [prompt_text]
-        for i, attachment in enumerate(context.attachments):
-            print(f"DEBUG:   Attachment {i}: path={attachment.path}, exists={attachment.path.exists()}, size={attachment.path.stat().st_size if attachment.path.exists() else 'N/A'}", file=sys.stderr)
-            sys.stderr.flush()
-            print(f"DEBUG:   Calling BinaryContent.from_path...", file=sys.stderr)
-            sys.stderr.flush()
+        for attachment in context.attachments:
             binary_content = BinaryContent.from_path(attachment.path)
-            print(f"DEBUG:   Created BinaryContent with media_type={binary_content.media_type}", file=sys.stderr)
-            sys.stderr.flush()
             user_content.append(binary_content)
-        print(f"DEBUG: All attachments processed, prompt list has {len(user_content)} items", file=sys.stderr)
-        sys.stderr.flush()
         prompt = user_content
     else:
         # Just text, no attachments
@@ -554,8 +545,7 @@ def _prepare_agent_execution(
                         )
                     except Exception as e:
                         # Log but don't crash on callback errors
-                        print(f"DEBUG: Error in stream handler callback: {e}", file=sys.stderr)
-                        sys.stderr.flush()
+                        logger.exception("Error in stream handler callback: %s", e)
 
             event_handler = _stream_handler
 
@@ -663,20 +653,12 @@ def _register_worker_tools(agent: Agent) -> None:
         input_data: Any = None,
         attachments: Optional[List[str]] = None,
     ) -> Any:
-        import sys
-        print(f"DEBUG: worker_call_tool called for worker={worker}", file=sys.stderr)
-        sys.stderr.flush()
-
-        result = await _worker_call_tool_async(
+        return await _worker_call_tool_async(
             ctx.deps,
             worker=worker,
             input_data=input_data,
             attachments=attachments,
         )
-
-        print(f"DEBUG: worker_call_tool completed for worker={worker}", file=sys.stderr)
-        sys.stderr.flush()
-        return result
 
     @agent.tool(name="worker_create", description="Persist a new worker definition using the active profile")
     def worker_create_tool(
@@ -869,28 +851,12 @@ async def _default_agent_runner_async(
         Tuple of (output, messages) where messages is the list of all messages
         exchanged with the LLM during execution.
     """
-    import sys
-
     # Prepare execution context (prompt, callbacks, agent kwargs)
     exec_ctx = _prepare_agent_execution(definition, user_input, context, output_model)
 
-    # Debug logging
-    print(f"DEBUG: About to call agent.run with prompt type: {type(exec_ctx.prompt)}", file=sys.stderr)
-    if isinstance(exec_ctx.prompt, list):
-        print(f"DEBUG: Prompt has {len(exec_ctx.prompt)} items", file=sys.stderr)
-        for i, item in enumerate(exec_ctx.prompt):
-            print(f"DEBUG:   Item {i}: {type(item).__name__}", file=sys.stderr)
-    sys.stderr.flush()
-
     # Create Agent
-    print(f"DEBUG: Creating Agent in async runner...", file=sys.stderr)
-    sys.stderr.flush()
-
     agent = Agent(**exec_ctx.agent_kwargs)
     _register_worker_tools(agent)
-
-    print(f"DEBUG: Agent created, calling agent.run()...", file=sys.stderr)
-    sys.stderr.flush()
 
     # Run the agent asynchronously
     run_result = await agent.run(
@@ -899,11 +865,7 @@ async def _default_agent_runner_async(
         event_stream_handler=exec_ctx.event_handler,
     )
 
-    print(f"DEBUG: agent.run() completed successfully", file=sys.stderr)
-    sys.stderr.flush()
-
     if exec_ctx.emit_status is not None and exec_ctx.started_at is not None:
-        from time import perf_counter
         exec_ctx.emit_status("end", duration=round(perf_counter() - exec_ctx.started_at, 2))
 
     # Extract all messages from the result
@@ -934,10 +896,6 @@ def _default_agent_runner(
         exchanged with the LLM during execution.
     """
     import asyncio
-    import sys
-
-    print(f"DEBUG: Sync runner wrapping async runner with asyncio.run()", file=sys.stderr)
-    sys.stderr.flush()
 
     # Simply wrap the async version with asyncio.run()
     return asyncio.run(
