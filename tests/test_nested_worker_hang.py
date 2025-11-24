@@ -163,7 +163,6 @@ This project aims to create an automated system for converting whiteboard photos
         llm_do.runtime.call_worker_async = original_call_worker_async
 
 
-@pytest.mark.skip(reason="TestModel makes default tool calls that fail without sandboxes")
 def test_direct_whiteboard_planner_works(whiteboard_registry):
     """Verify that whiteboard_planner works when called directly (not nested).
 
@@ -198,7 +197,9 @@ A simple test project.
 - None identified
 """
 
-    planner_model = TestModel()
+    # TestModel defaults to tool calling, which fails because this worker has no sandboxes.
+    # Disable tool usage and return a deterministic plan so we can verify the output.
+    planner_model = TestModel(call_tools=[], custom_output_text=plan_text)
 
     # Call whiteboard_planner directly (not through orchestrator)
     result = run_worker(
@@ -211,8 +212,7 @@ A simple test project.
     )
 
     assert result is not None
-    # TestModel returns a default response, so we just verify it didn't hang
-    assert result.output is not None
+    assert result.output == plan_text
 
 
 # NOTE: Live API test moved to tests/test_integration_live.py
