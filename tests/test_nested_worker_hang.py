@@ -215,24 +215,41 @@ A simple test project.
     assert result.output is not None
 
 
-@pytest.mark.skip(reason="This test will hang - use to reproduce the bug")
-def test_nested_worker_with_real_models_hangs(whiteboard_registry):
-    """Test that demonstrates the actual hang with real models.
+@pytest.mark.slow
+def test_nested_worker_with_real_api(whiteboard_registry):
+    """Integration test: nested worker calls with real API now work!
 
-    WARNING: This test will hang when run with real API models!
-    Only run this manually when debugging the issue.
+    This test was previously marked as hanging, but the async refactor fixed it.
+    It validates that nested worker calls with attachments work end-to-end with
+    real API calls.
 
-    To reproduce:
-    1. Set ANTHROPIC_API_KEY
-    2. Run: pytest -k test_nested_worker_with_real_models_hangs -v
-    3. Observe the hang at the nested worker_call
+    Requirements:
+    1. Set ANTHROPIC_API_KEY environment variable
+    2. Run: pytest -k test_nested_worker_with_real_api -v
+
+    What it tests:
+    - Orchestrator calls Claude API
+    - Orchestrator uses worker_call tool to delegate to whiteboard_planner
+    - Nested worker receives attachment and calls Claude API again
+    - No hang occurs due to async implementation
+    - Result is properly returned and written
     """
-    # Setup input file
+    # Setup input file with real image data
     input_dir = Path("input")
     input_dir.mkdir(exist_ok=True)
-    (input_dir / "white_board_plan.png").write_bytes(b"fake whiteboard image data")
+    # Create a minimal valid PNG (1x1 pixel red image)
+    png_data = (
+        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+        b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf'
+        b'\xc0\x00\x00\x00\x03\x00\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    )
+    (input_dir / "white_board_plan.png").write_bytes(png_data)
 
-    # This will hang when worker_call tries to invoke whiteboard_planner
+    # Setup plans directory
+    plans_dir = Path("plans")
+    plans_dir.mkdir(exist_ok=True)
+
+    # This will now complete successfully (no hang!)
     result = run_worker(
         registry=whiteboard_registry,
         worker="whiteboard_orchestrator",
@@ -241,5 +258,9 @@ def test_nested_worker_with_real_models_hangs(whiteboard_registry):
         approval_callback=approve_all_callback,
     )
 
-    # Never reaches here due to hang
+    # Verify it completed
     assert result is not None
+
+    # Verify a plan was written (orchestrator's job is to process images and create plans)
+    written_files = list(plans_dir.glob("*.md"))
+    assert len(written_files) > 0, "Orchestrator should have written at least one plan file"

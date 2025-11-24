@@ -57,3 +57,7 @@ addopts = [
     "-v",
     "--strict-markers",
 ]
+markers = [
+    "examples: tests that use example workers",
+    "slow: tests that make real API calls (deselect with '-k \"not slow\"')",
+]
