@@ -340,13 +340,18 @@ def _load_custom_tools(agent: Agent, context: WorkerContext) -> None:
     """Load and register custom tools from tools.py module.
 
     Custom tools are functions defined in the tools.py file in the worker's directory.
-    Each function should have appropriate type hints and a docstring.
+    Only functions explicitly listed in the worker's tool_rules are registered.
+    Each tool call is wrapped with the approval controller to enforce security policies.
 
-    The tools are registered with the agent and subject to the same approval
-    rules as built-in tools via tool_rules in the worker definition.
+    Security guarantees:
+    - Only functions listed in definition.tool_rules are registered (allowlist)
+    - All tool calls go through approval_controller.maybe_run() (approval enforcement)
+    - Tool rules (allowed, approval_required) are respected
     """
     import importlib.util
     import sys
+    import inspect
+    from functools import wraps
 
     tools_path = context.custom_tools_path
     if not tools_path or not tools_path.exists():
@@ -367,24 +372,97 @@ def _load_custom_tools(agent: Agent, context: WorkerContext) -> None:
         logger.error(f"Error loading custom tools from {tools_path}: {e}")
         return
 
-    # Register all callable functions from the module as tools
-    # Functions with names starting with _ are considered private
-    import inspect
-    for name in dir(module):
-        if name.startswith("_"):
+    # Only register functions that are explicitly allowed in tool_rules
+    allowed_tools = {
+        name: rule
+        for name, rule in context.worker.tool_rules.items()
+        if rule.allowed
+    }
+
+    if not allowed_tools:
+        logger.debug(f"No custom tools allowed in tool_rules for {context.worker.name}")
+        return
+
+    # Find and register allowed functions from the module
+    for tool_name, tool_rule in allowed_tools.items():
+        # Check if this tool exists in the module
+        if not hasattr(module, tool_name):
             continue
 
-        obj = getattr(module, name)
+        obj = getattr(module, tool_name)
         if not (callable(obj) and inspect.isfunction(obj) and obj.__module__ == module.__name__):
+            logger.warning(f"Custom tool '{tool_name}' is not a function in {tools_path}")
             continue
 
-        # Register using tool_plain since custom tools don't need WorkerContext
+        # Wrap the function to enforce approval via the approval controller
+        # This ensures tool_rules.approval_required is respected
+        def make_wrapped_tool(func, name):
+            """Create a wrapped tool that goes through approval controller."""
+            # Get the original function's signature
+            orig_sig = inspect.signature(func)
+            orig_params = list(orig_sig.parameters.values())
+
+            # Build new parameters list: ctx first, then original params
+            new_params = [
+                inspect.Parameter(
+                    'ctx',
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=RunContext[WorkerContext]
+                )
+            ]
+            # Add copies of original parameters
+            for param in orig_params:
+                new_params.append(
+                    inspect.Parameter(
+                        param.name,
+                        param.kind,
+                        default=param.default,
+                        annotation=param.annotation
+                    )
+                )
+
+            # Create new signature with ctx added
+            new_sig = inspect.Signature(parameters=new_params, return_annotation=orig_sig.return_annotation)
+
+            # Create wrapper function
+            def wrapped_tool(ctx, **tool_kwargs):
+                """Wrapped custom tool that enforces approval rules."""
+                def _invoke():
+                    # Call the original function with the tool arguments
+                    return func(**tool_kwargs)
+
+                # Use approval controller to enforce tool_rules
+                return ctx.deps.approval_controller.maybe_run(
+                    name,
+                    tool_kwargs,
+                    _invoke,
+                )
+
+            # Apply the new signature and preserve metadata
+            wrapped_tool.__signature__ = new_sig
+            wrapped_tool.__name__ = func.__name__
+            wrapped_tool.__doc__ = func.__doc__
+            wrapped_tool.__annotations__ = {
+                'ctx': RunContext[WorkerContext],
+                **func.__annotations__,
+                'return': func.__annotations__.get('return', orig_sig.return_annotation)
+            }
+
+            return wrapped_tool
+
         try:
-            # Use the function's existing signature and docstring
-            agent.tool_plain(name=name, description=obj.__doc__ or f"Custom tool: {name}")(obj)
-            logger.debug(f"Registered custom tool: {name}")
+            # Create wrapped version that enforces approvals
+            wrapped = make_wrapped_tool(obj, tool_name)
+
+            # Register using agent.tool (not tool_plain) since we need RunContext for approval
+            agent.tool(
+                name=tool_name,
+                description=obj.__doc__ or tool_rule.description or f"Custom tool: {tool_name}"
+            )(wrapped)
+
+            logger.debug(f"Registered custom tool with approval enforcement: {tool_name}")
         except Exception as e:
-            logger.warning(f"Could not register custom tool '{name}': {e}")
+            logger.warning(f"Could not register custom tool '{tool_name}': {e}")
 
 
 async def _worker_call_tool_async(
