@@ -21,7 +21,7 @@ from llm_do import (
     call_worker,
     create_worker,
 )
-from llm_do.base import _worker_call_tool, _worker_create_tool
+from llm_do.runtime import _worker_call_tool, _worker_create_tool
 
 
 def _registry(tmp_path):
@@ -200,7 +200,7 @@ def test_worker_call_tool_respects_approval(monkeypatch, tmp_path):
         invoked = True
         return WorkerRunResult(output={"ok": True})
 
-    monkeypatch.setattr("llm_do.base.call_worker", fake_call_worker)
+    monkeypatch.setattr("llm_do.runtime.call_worker", fake_call_worker)
 
     # With default auto-approve callback, the tool executes
     result = _worker_call_tool(context, worker="child", input_data={"task": "demo"})
@@ -224,7 +224,7 @@ def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
         captured.update(kwargs)
         return WorkerRunResult(output={"status": "ok"})
 
-    monkeypatch.setattr("llm_do.base.call_worker", fake_call_worker)
+    monkeypatch.setattr("llm_do.runtime.call_worker", fake_call_worker)
 
     result = _worker_call_tool(
         context,
@@ -354,7 +354,7 @@ def test_worker_call_tool_includes_attachment_metadata(monkeypatch, tmp_path):
         return func()
 
     context.approval_controller.maybe_run = fake_maybe_run
-    monkeypatch.setattr("llm_do.base.call_worker", fake_call_worker)
+    monkeypatch.setattr("llm_do.runtime.call_worker", fake_call_worker)
 
     result = _worker_call_tool(
         context,
@@ -413,7 +413,7 @@ def test_worker_create_tool_respects_approval(monkeypatch, tmp_path):
         invoked = True
         return DummyDefinition(kwargs["spec"].model_dump(mode="json"))
 
-    monkeypatch.setattr("llm_do.base.create_worker", fake_create_worker)
+    monkeypatch.setattr("llm_do.runtime.create_worker", fake_create_worker)
 
     # With default auto-approve callback, the tool executes
     result = _worker_create_tool(context, name="child", instructions="demo")

@@ -125,7 +125,7 @@ This project aims to create an automated system for converting whiteboard photos
 
     # Mock call_worker_async to return the expected plan without actually running the nested worker
     # Now that async is working, we mock the async version instead of the sync version
-    from llm_do.base import WorkerRunResult
+    from llm_do import WorkerRunResult
 
     async def mock_call_worker_async(**kwargs):
         # Verify the worker_call was made with correct parameters
@@ -137,9 +137,9 @@ This project aims to create an automated system for converting whiteboard photos
         # Return the mocked plan
         return WorkerRunResult(output=whiteboard_plan_markdown, messages=[])
 
-    import llm_do.base
-    original_call_worker_async = llm_do.base.call_worker_async
-    llm_do.base.call_worker_async = mock_call_worker_async
+    import llm_do.runtime
+    original_call_worker_async = llm_do.runtime.call_worker_async
+    llm_do.runtime.call_worker_async = mock_call_worker_async
 
     try:
         # Run the orchestrator
@@ -160,7 +160,7 @@ This project aims to create an automated system for converting whiteboard photos
         assert "Project: Whiteboard Planning System" in plan_content
     finally:
         # Restore original call_worker_async
-        llm_do.base.call_worker_async = original_call_worker_async
+        llm_do.runtime.call_worker_async = original_call_worker_async
 
 
 @pytest.mark.skip(reason="TestModel makes default tool calls that fail without sandboxes")
@@ -215,52 +215,5 @@ A simple test project.
     assert result.output is not None
 
 
-@pytest.mark.slow
-def test_nested_worker_with_real_api(whiteboard_registry):
-    """Integration test: nested worker calls with real API now work!
-
-    This test was previously marked as hanging, but the async refactor fixed it.
-    It validates that nested worker calls with attachments work end-to-end with
-    real API calls.
-
-    Requirements:
-    1. Set ANTHROPIC_API_KEY environment variable
-    2. Run: pytest -k test_nested_worker_with_real_api -v
-
-    What it tests:
-    - Orchestrator calls Claude API
-    - Orchestrator uses worker_call tool to delegate to whiteboard_planner
-    - Nested worker receives attachment and calls Claude API again
-    - No hang occurs due to async implementation
-    - Result is properly returned and written
-    """
-    # Setup input file with real image data
-    input_dir = Path("input")
-    input_dir.mkdir(exist_ok=True)
-    # Create a minimal valid PNG (1x1 pixel red image)
-    png_data = (
-        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
-        b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf'
-        b'\xc0\x00\x00\x00\x03\x00\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
-    )
-    (input_dir / "white_board_plan.png").write_bytes(png_data)
-
-    # Setup plans directory
-    plans_dir = Path("plans")
-    plans_dir.mkdir(exist_ok=True)
-
-    # This will now complete successfully (no hang!)
-    result = run_worker(
-        registry=whiteboard_registry,
-        worker="whiteboard_orchestrator",
-        input_data={},
-        cli_model="anthropic:claude-haiku-4-5",
-        approval_callback=approve_all_callback,
-    )
-
-    # Verify it completed
-    assert result is not None
-
-    # Verify a plan was written (orchestrator's job is to process images and create plans)
-    written_files = list(plans_dir.glob("*.md"))
-    assert len(written_files) > 0, "Orchestrator should have written at least one plan file"
+# NOTE: Live API test moved to tests/test_integration_live.py
+# Run with: pytest tests/test_integration_live.py -v

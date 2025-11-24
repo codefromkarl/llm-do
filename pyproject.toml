@@ -56,6 +56,8 @@ python_functions = ["test_*"]
 addopts = [
     "-v",
     "--strict-markers",
+    "--ignore=tests/test_integration_live.py",
+    "--ignore=examples/",
 ]
 markers = [
     "examples: tests that use example workers",
