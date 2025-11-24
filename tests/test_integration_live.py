@@ -60,8 +60,13 @@ def test_nested_worker_with_real_api(whiteboard_registry):
         cd examples/whiteboard_planner
         llm-do whiteboard_orchestrator --model anthropic:claude-haiku-4-5 --approve-all
     """
+    # Verify we're in the temp directory (fixture uses monkeypatch.chdir)
+    import os
+    cwd = Path(os.getcwd())
+    assert "pytest" in str(cwd), f"Test should run in temp dir, got: {cwd}"
+
     # The example already has input/white_board_plan.png from the copytree
-    # Just ensure the plans directory exists
+    # Just ensure the plans directory exists in our temp copy
     plans_dir = Path("plans")
     plans_dir.mkdir(exist_ok=True)
 
