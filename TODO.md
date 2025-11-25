@@ -13,3 +13,7 @@
 ## Bootstrapper
 
 - [ ] Implement automatic iterative refinement: bootstrapper should read the created worker, call it, evaluate output, and refine the definition if needed.
+
+## Security & Sandboxing
+
+- [ ] OS-level sandbox enforcement (Phase 6-7): Add Seatbelt (macOS) and bubblewrap (Linux) wrappers for shell subprocess isolation. See `docs/notes/shell_tool_and_approval_patterns.md` for design.
