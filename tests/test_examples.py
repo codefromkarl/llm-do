@@ -144,14 +144,13 @@ def test_save_note_example(approvals_demo_registry, tool_calling_model_cls):
     if log_file.exists():
         log_file.unlink()
 
-    # Mock model that actually calls sandbox_write_text
+    # Mock model that actually calls write_file
     note_content = "2025-11-22 14:30 • Test note from integration test"
     model = tool_calling_model_cls([
         {
-            "name": "sandbox_write_text",
+            "name": "write_file",
             "args": {
-                "sandbox": "notes",
-                "path": "activity.log",
+                "path": "notes/activity.log",
                 "content": note_content,
             },
         }
@@ -189,10 +188,9 @@ def test_save_note_with_string_input(approvals_demo_registry, tool_calling_model
     note_content = "2025-11-22 15:00 • Plain string note"
     model = tool_calling_model_cls([
         {
-            "name": "sandbox_write_text",
+            "name": "write_file",
             "args": {
-                "sandbox": "notes",
-                "path": "activity.log",
+                "path": "notes/activity.log",
                 "content": note_content,
             },
         }
@@ -229,10 +227,9 @@ def test_save_note_strict_mode_blocks_write(approvals_demo_registry, tool_callin
     # Mock model that tries to write
     model = tool_calling_model_cls([
         {
-            "name": "sandbox_write_text",
+            "name": "write_file",
             "args": {
-                "sandbox": "notes",
-                "path": "activity.log",
+                "path": "notes/activity.log",
                 "content": "Should be blocked",
             },
         }

@@ -358,8 +358,8 @@ async def run_worker_async(
 
     defaults = creation_defaults or WorkerCreationDefaults()
 
-    # Create new unified sandbox if available, otherwise use legacy
-    new_sandbox: Optional[Sandbox] = None
+    # Create new unified sandbox (always required now)
+    new_sandbox: Sandbox
     if definition.sandbox is not None:
         # New unified sandbox config
         new_sandbox = Sandbox(definition.sandbox, base_path=registry.root)
@@ -376,6 +376,10 @@ async def run_worker_async(
         sandbox_config = sandbox_config_from_legacy(defaults.default_sandboxes, registry.root)
         new_sandbox = Sandbox(sandbox_config, base_path=registry.root)
         logger.debug(f"Using converted default sandboxes for worker '{worker}'")
+    else:
+        # Create empty sandbox with no paths
+        new_sandbox = Sandbox(SandboxConfig(), base_path=registry.root)
+        logger.debug(f"Using empty sandbox for worker '{worker}'")
 
     # Also create legacy SandboxManager for backward compatibility
     sandbox_manager = SandboxManager(definition.sandboxes or defaults.default_sandboxes)
@@ -493,8 +497,8 @@ def run_worker(
 
     defaults = creation_defaults or WorkerCreationDefaults()
 
-    # Create new unified sandbox if available, otherwise use legacy
-    new_sandbox: Optional[Sandbox] = None
+    # Create new unified sandbox (always required now)
+    new_sandbox: Sandbox
     if definition.sandbox is not None:
         # New unified sandbox config
         new_sandbox = Sandbox(definition.sandbox, base_path=registry.root)
@@ -511,6 +515,10 @@ def run_worker(
         sandbox_config = sandbox_config_from_legacy(defaults.default_sandboxes, registry.root)
         new_sandbox = Sandbox(sandbox_config, base_path=registry.root)
         logger.debug(f"Using converted default sandboxes for worker '{worker}'")
+    else:
+        # Create empty sandbox with no paths
+        new_sandbox = Sandbox(SandboxConfig(), base_path=registry.root)
+        logger.debug(f"Using empty sandbox for worker '{worker}'")
 
     # Also create legacy SandboxManager for backward compatibility
     sandbox_manager = SandboxManager(definition.sandboxes or defaults.default_sandboxes)

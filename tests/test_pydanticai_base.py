@@ -417,9 +417,9 @@ def test_default_agent_runner_uses_pydantic_ai(registry):
     assert json.loads(payload["prompt"]) == {"task": "demo"}
     assert payload["instructions"] == definition.instructions
     assert model.tool_names == [
-        "sandbox_list",
-        "sandbox_read_text",
-        "sandbox_write_text",
+        "read_file",
+        "write_file",
+        "list_files",
         "shell",
         "worker_call",
         "worker_create",

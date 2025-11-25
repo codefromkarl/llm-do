@@ -90,13 +90,13 @@ This project aims to create an automated system for converting whiteboard photos
     orchestrator_model = ToolCallingModel([
         # First attempt: list with pattern (returns empty)
         {
-            "name": "sandbox_list",
-            "args": {"sandbox": "input", "pattern": "**/*.{jpg,jpeg,png}"}
+            "name": "list_files",
+            "args": {"path": "input", "pattern": "**/*.{jpg,jpeg,png}"}
         },
         # Second attempt: list without pattern (finds the file)
         {
-            "name": "sandbox_list",
-            "args": {"sandbox": "input"}
+            "name": "list_files",
+            "args": {"path": "input"}
         },
         # Call the whiteboard_planner worker with attachment
         # In the real scenario with live models, THIS IS WHERE THE HANG OCCURS
@@ -111,10 +111,9 @@ This project aims to create an automated system for converting whiteboard photos
         },
         # After getting the plan, write it to the plans sandbox
         {
-            "name": "sandbox_write_text",
+            "name": "write_file",
             "args": {
-                "sandbox": "plans",
-                "path": "white_board_plan.md",
+                "path": "plans/white_board_plan.md",
                 "content": whiteboard_plan_markdown
             }
         }

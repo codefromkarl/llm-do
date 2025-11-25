@@ -36,7 +36,7 @@ def register_worker_tools(
     context: WorkerContext,
     delegator: WorkerDelegator,
     creator: WorkerCreator,
-    sandbox: Optional[FileSandbox] = None,
+    sandbox: FileSandbox,
 ) -> None:
     """Register all tools for a worker.
 
@@ -45,21 +45,18 @@ def register_worker_tools(
         context: Worker execution context
         delegator: Implementation of worker delegation (DI)
         creator: Implementation of worker creation (DI)
-        sandbox: Optional FileSandbox instance (new unified sandbox).
-                 If not provided, falls back to legacy sandbox_toolset.
+        sandbox: FileSandbox instance providing file operations
 
     Registers:
-    1. Sandbox tools (list, read_text, write_text)
-    2. Worker delegation tool (worker_call)
-    3. Worker creation tool (worker_create)
-    4. Custom tools from tools.py if available
+    1. Sandbox tools (read_file, write_file, list_files)
+    2. Shell tool (if enabled)
+    3. Worker delegation tool (worker_call)
+    4. Worker creation tool (worker_create)
+    5. Custom tools from tools.py if available
     """
 
     # Register built-in sandbox tools
-    if sandbox is not None:
-        _register_new_sandbox_tools(agent, context, file_sandbox=sandbox)
-    else:
-        _register_sandbox_tools(agent, context)
+    _register_sandbox_tools(agent, context, file_sandbox=sandbox)
 
     # Register shell tool if enabled
     _register_shell_tool(agent, context, sandbox)
@@ -72,60 +69,14 @@ def register_worker_tools(
         load_custom_tools(agent, context)
 
 
-def _register_sandbox_tools(agent: Agent, context: WorkerContext) -> None:
-    """Register legacy sandbox file operations.
-
-    These tools use the old sandbox_toolset API with explicit sandbox names.
-    Kept for backward compatibility.
-    """
-
-    @agent.tool(
-        name="sandbox_list",
-        description="List files within a sandbox using a glob pattern"
-    )
-    def sandbox_list(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        pattern: str = "**/*",
-    ) -> List[str]:
-        return ctx.deps.sandbox_toolset.list(sandbox, pattern)
-
-    @agent.tool(
-        name="sandbox_read_text",
-        description="Read UTF-8 text from a sandboxed file. "
-                    "Do not use this on binary files (PDFs, images, etc) - "
-                    "pass them as attachments instead."
-    )
-    def sandbox_read_text(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        path: str,
-        *,
-        max_chars: int = 200_000,
-    ) -> str:
-        return ctx.deps.sandbox_toolset.read_text(sandbox, path, max_chars=max_chars)
-
-    @agent.tool(
-        name="sandbox_write_text",
-        description="Write UTF-8 text to a sandboxed file"
-    )
-    def sandbox_write_text(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        path: str,
-        content: str,
-    ) -> Optional[str]:
-        return ctx.deps.sandbox_toolset.write_text(sandbox, path, content)
-
-
-def _register_new_sandbox_tools(
+def _register_sandbox_tools(
     agent: Agent,
     context: WorkerContext,
     file_sandbox: FileSandbox,
 ) -> None:
-    """Register new sandbox file operations using FileSandbox protocol.
+    """Register sandbox file operations using FileSandbox protocol.
 
-    These tools use the new unified sandbox API with path format "sandbox_name/relative/path".
+    These tools use the unified sandbox API with path format "sandbox_name/relative/path".
     Tool implementations are defined in file_sandbox.py for reusability.
     """
 
@@ -178,49 +129,6 @@ def _register_new_sandbox_tools(
         pattern: str = "**/*",
     ) -> List[str]:
         return file_sandbox.list_files(path, pattern)
-
-    # Also register legacy tool names as aliases for backward compatibility
-    # Note: parameter names must match old API (sandbox, not sandbox_name)
-    @agent.tool(
-        name="sandbox_list",
-        description="[DEPRECATED: Use list_files instead] List files within a sandbox"
-    )
-    def sandbox_list_compat(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        pattern: str = "**/*",
-    ) -> List[str]:
-        return file_sandbox.list_files(sandbox, pattern)
-
-    @agent.tool(
-        name="sandbox_read_text",
-        description="[DEPRECATED: Use read_file instead] Read UTF-8 text from a sandboxed file"
-    )
-    def sandbox_read_text_compat(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        path: str,
-        max_chars: int = 200_000,
-    ) -> str:
-        return file_sandbox.read(f"{sandbox}/{path}", max_chars=max_chars)
-
-    @agent.tool(
-        name="sandbox_write_text",
-        description="[DEPRECATED: Use write_file instead] Write UTF-8 text to a sandboxed file"
-    )
-    def sandbox_write_text_compat(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        path: str,
-        content: str,
-    ) -> str:
-        # Route through approval controller for writes
-        full_path = f"{sandbox}/{path}"
-        return ctx.deps.approval_controller.maybe_run(
-            "sandbox.write",
-            {"sandbox": sandbox, "path": path},
-            lambda: file_sandbox.write(full_path, content),
-        )
 
 
 def _register_shell_tool(

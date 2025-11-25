@@ -50,10 +50,9 @@ def test_integration_approve_all_allows_write(tmp_path, registry, tool_calling_m
     mock_model = tool_calling_model_cls(
         [
             {
-                "name": "sandbox_write_text",
+                "name": "write_file",
                 "args": {
-                    "sandbox": "out",
-                    "path": "test.txt",
+                    "path": "out/test.txt",
                     "content": "Hello from test!",
                 },
             }
@@ -97,10 +96,9 @@ def test_integration_strict_mode_blocks_write(tmp_path, registry, tool_calling_m
     mock_model = tool_calling_model_cls(
         [
             {
-                "name": "sandbox_write_text",
+                "name": "write_file",
                 "args": {
-                    "sandbox": "out",
-                    "path": "test.txt",
+                    "path": "out/test.txt",
                     "content": "Hello from test!",
                 },
             }
@@ -146,16 +144,16 @@ def test_integration_multiple_tool_calls_with_session_approval(
     mock_model = tool_calling_model_cls(
         [
             {
-                "name": "sandbox_write_text",
-                "args": {"sandbox": "out", "path": "test.txt", "content": "same content"},
+                "name": "write_file",
+                "args": {"path": "out/test.txt", "content": "same content"},
             },
             {
-                "name": "sandbox_write_text",
-                "args": {"sandbox": "out", "path": "test.txt", "content": "same content"},
+                "name": "write_file",
+                "args": {"path": "out/test.txt", "content": "same content"},
             },
             {
-                "name": "sandbox_write_text",
-                "args": {"sandbox": "out", "path": "test.txt", "content": "same content"},
+                "name": "write_file",
+                "args": {"path": "out/test.txt", "content": "same content"},
             },
         ]
     )
@@ -217,14 +215,13 @@ def test_integration_read_and_write_flow(tmp_path, registry, tool_calling_model_
     mock_model = tool_calling_model_cls(
         [
             {
-                "name": "sandbox_read_text",
-                "args": {"sandbox": "in", "path": "data.txt"},
+                "name": "read_file",
+                "args": {"path": "in/data.txt"},
             },
             {
-                "name": "sandbox_write_text",
+                "name": "write_file",
                 "args": {
-                    "sandbox": "out",
-                    "path": "result.txt",
+                    "path": "out/result.txt",
                     "content": "processed: input data",
                 },
             },
@@ -267,12 +264,12 @@ def test_integration_rejection_stops_workflow(tmp_path, registry, tool_calling_m
     mock_model = tool_calling_model_cls(
         [
             {
-                "name": "sandbox_write_text",
-                "args": {"sandbox": "out", "path": "file1.txt", "content": "First"},
+                "name": "write_file",
+                "args": {"path": "out/file1.txt", "content": "First"},
             },
             {
-                "name": "sandbox_write_text",
-                "args": {"sandbox": "out", "path": "file2.txt", "content": "Second"},
+                "name": "write_file",
+                "args": {"path": "out/file2.txt", "content": "Second"},
             },
         ]
     )
