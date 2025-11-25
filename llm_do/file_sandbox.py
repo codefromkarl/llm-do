@@ -3,16 +3,18 @@
 This module provides the reusable core of the sandbox functionality:
 - FileSandboxConfig and PathConfig for configuration
 - FileSandboxError classes with LLM-friendly messages
-- FileSandboxImpl implementation of the FileSandbox protocol
+- FileSandboxImpl implementation as a PydanticAI AbstractToolset
 
 This is designed to be potentially extractable as a PydanticAI contrib package.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
+from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_ai.tools import RunContext, ToolDefinition
 
 
 # ---------------------------------------------------------------------------
@@ -122,21 +124,32 @@ class FileTooLargeError(FileSandboxError):
 # ---------------------------------------------------------------------------
 
 
-class FileSandboxImpl:
-    """File sandbox implementation with LLM-friendly error messages.
+class FileSandboxImpl(AbstractToolset[Any]):
+    """File sandbox implementation as a PydanticAI AbstractToolset.
 
-    Implements the FileSandbox protocol defined in protocols.py.
+    Implements both the FileSandbox protocol and AbstractToolset interface.
+    Provides read_file, write_file, and list_files tools.
     """
 
-    def __init__(self, config: FileSandboxConfig, base_path: Optional[Path] = None):
-        """Initialize the file sandbox.
+    def __init__(
+        self,
+        config: FileSandboxConfig,
+        base_path: Optional[Path] = None,
+        id: Optional[str] = None,
+        max_retries: int = 1,
+    ):
+        """Initialize the file sandbox toolset.
 
         Args:
             config: Sandbox configuration
             base_path: Base path for resolving relative roots (defaults to cwd)
+            id: Optional toolset ID for durable execution
+            max_retries: Maximum number of retries for tool calls (default: 1)
         """
         self.config = config
         self._base_path = base_path or Path.cwd()
+        self._toolset_id = id
+        self._max_retries = max_retries
         self._paths: dict[str, tuple[Path, PathConfig]] = {}
         self._setup_paths()
 
@@ -400,3 +413,145 @@ class FileSandboxImpl:
                 except ValueError:
                     continue
         return sorted(results)
+
+    # ---------------------------------------------------------------------------
+    # AbstractToolset Implementation
+    # ---------------------------------------------------------------------------
+
+    @property
+    def id(self) -> str | None:
+        """Unique identifier for this toolset."""
+        return self._toolset_id
+
+    async def get_tools(self, ctx: RunContext[Any]) -> dict[str, ToolsetTool[Any]]:
+        """Return the tools provided by this toolset."""
+        tools = {}
+
+        # Define tool schemas
+        read_file_schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path format: 'sandbox_name/relative/path'",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "default": 200_000,
+                    "description": "Maximum characters to read (default 200,000)",
+                },
+            },
+            "required": ["path"],
+        }
+
+        write_file_schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path format: 'sandbox_name/relative/path'",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write to the file",
+                },
+            },
+            "required": ["path", "content"],
+        }
+
+        list_files_schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "default": ".",
+                    "description": "Path format: 'sandbox_name' or 'sandbox_name/subdir' (default: '.')",
+                },
+                "pattern": {
+                    "type": "string",
+                    "default": "**/*",
+                    "description": "Glob pattern to match (default: '**/*')",
+                },
+            },
+        }
+
+        # Create ToolsetTool instances
+        tools["read_file"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="read_file",
+                description=(
+                    "Read a text file from the sandbox. "
+                    "Path format: 'sandbox_name/relative/path'. "
+                    "Do not use this on binary files (PDFs, images, etc) - "
+                    "pass them as attachments instead."
+                ),
+                parameters_json_schema=read_file_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
+        tools["write_file"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="write_file",
+                description=(
+                    "Write a text file to the sandbox. "
+                    "Path format: 'sandbox_name/relative/path'."
+                ),
+                parameters_json_schema=write_file_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
+        tools["list_files"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="list_files",
+                description=(
+                    "List files in the sandbox matching a glob pattern. "
+                    "Path format: 'sandbox_name' or 'sandbox_name/subdir'. "
+                    "Use '.' to list all sandboxes."
+                ),
+                parameters_json_schema=list_files_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
+        return tools
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[Any],
+        tool: ToolsetTool[Any],
+    ) -> Any:
+        """Call a tool with the given arguments."""
+        if name == "read_file":
+            path = tool_args["path"]
+            max_chars = tool_args.get("max_chars", 200_000)
+            return self.read(path, max_chars=max_chars)
+
+        elif name == "write_file":
+            path = tool_args["path"]
+            content = tool_args["content"]
+            # Check if ctx.deps has approval_controller for writes
+            if hasattr(ctx.deps, "approval_controller"):
+                return ctx.deps.approval_controller.maybe_run(
+                    "sandbox.write",
+                    {"path": path},
+                    lambda: self.write(path, content),
+                )
+            return self.write(path, content)
+
+        elif name == "list_files":
+            path = tool_args.get("path", ".")
+            pattern = tool_args.get("pattern", "**/*")
+            return self.list_files(path, pattern)
+
+        else:
+            raise ValueError(f"Unknown tool: {name}")

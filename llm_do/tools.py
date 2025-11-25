@@ -126,14 +126,17 @@ def _register_new_sandbox_tools(
     """Register new sandbox file operations using FileSandbox protocol.
 
     These tools use the new unified sandbox API with path format "sandbox_name/relative/path".
+    Tool implementations are defined in file_sandbox.py for reusability.
     """
 
     @agent.tool(
         name="read_file",
-        description="Read a text file from the sandbox. "
-                    "Path format: 'sandbox_name/relative/path'. "
-                    "Do not use this on binary files (PDFs, images, etc) - "
-                    "pass them as attachments instead."
+        description=(
+            "Read a text file from the sandbox. "
+            "Path format: 'sandbox_name/relative/path'. "
+            "Do not use this on binary files (PDFs, images, etc) - "
+            "pass them as attachments instead."
+        )
     )
     def read_file(
         ctx: RunContext[WorkerContext],
@@ -144,8 +147,10 @@ def _register_new_sandbox_tools(
 
     @agent.tool(
         name="write_file",
-        description="Write a text file to the sandbox. "
-                    "Path format: 'sandbox_name/relative/path'."
+        description=(
+            "Write a text file to the sandbox. "
+            "Path format: 'sandbox_name/relative/path'."
+        )
     )
     def write_file(
         ctx: RunContext[WorkerContext],
@@ -161,9 +166,11 @@ def _register_new_sandbox_tools(
 
     @agent.tool(
         name="list_files",
-        description="List files in the sandbox matching a glob pattern. "
-                    "Path format: 'sandbox_name' or 'sandbox_name/subdir'. "
-                    "Use '.' to list all sandboxes."
+        description=(
+            "List files in the sandbox matching a glob pattern. "
+            "Path format: 'sandbox_name' or 'sandbox_name/subdir'. "
+            "Use '.' to list all sandboxes."
+        )
     )
     def list_files(
         ctx: RunContext[WorkerContext],
