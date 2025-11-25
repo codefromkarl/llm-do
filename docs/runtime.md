@@ -22,7 +22,7 @@ result = run_worker(
     message_callback=on_message,   # For streaming events
 )
 
-# Async version
+# Async version (recommended for nested worker calls)
 result = await run_worker_async(
     registry=registry,
     worker="my-worker",
@@ -44,6 +44,8 @@ result = await run_worker_async(
 
 **Returns:** `WorkerRunResult` with `output` and `messages`.
 
+**Implementation Note:** Both functions share preparation logic through internal helpers (`_prepare_worker_context`, `_handle_result`) to avoid duplication while maintaining separate sync/async execution paths.
+
 ---
 
 ### call_worker / call_worker_async
@@ -60,7 +62,12 @@ result = await call_worker_async(
 )
 ```
 
-Enforces `allow_workers` allowlist from the caller's definition.
+**Enforces:**
+- `allow_workers` allowlist from the caller's definition
+- Attachment approval via `sandbox.read` with full metadata (path, size, target worker)
+- Attachment policy limits (max count, total size, allowed suffixes)
+
+**Note:** When delegating with attachments, each attachment triggers a `sandbox.read` approval check before being passed to the child worker. This ensures the user is aware of what files are being shared between workers.
 
 ---
 
@@ -101,7 +108,10 @@ Implements `WorkerDelegator` protocol. Handles worker delegation with approval e
 class RuntimeDelegator:
     def __init__(self, context: WorkerContext): ...
     async def call_async(self, worker: str, input_data: Any, attachments: list[str]) -> Any: ...
+    def call_sync(self, worker: str, input_data: Any, attachments: list[str]) -> Any: ...
 ```
+
+**Attachment approval enforcement:** When attachments are provided, `RuntimeDelegator` validates them through `AttachmentValidator`, then checks `sandbox.read` approval for each attachment before passing them to the child worker.
 
 ### RuntimeCreator
 
@@ -117,30 +127,55 @@ class RuntimeCreator:
 
 ## WorkerContext
 
-Runtime context passed to tools via PydanticAI's dependency injection.
+Runtime context passed to worker execution and available to tools via PydanticAI's dependency injection.
 
 ```python
 @dataclass
 class WorkerContext:
     registry: WorkerRegistry
     worker: WorkerDefinition
-    sandbox_manager: SandboxManager
-    sandbox_toolset: SandboxToolset
+    attachment_validator: AttachmentValidator
     creation_defaults: WorkerCreationDefaults
     effective_model: Optional[ModelLike]
     approval_controller: ApprovalController
     attachments: List[AttachmentPayload]
     message_callback: Optional[MessageCallback]
     custom_tools_path: Optional[Path]
+
+    def validate_attachments(
+        self, attachment_specs: Sequence[AttachmentInput]
+    ) -> tuple[List[Path], List[Dict[str, Any]]]:
+        """Resolve attachment specs to sandboxed files and enforce policy limits."""
 ```
+
+**Key components:**
+
+- **`attachment_validator`**: Validates and resolves attachments for worker delegation
+- **`approval_controller`**: Enforces tool rules and prompts for user approval
+- **`attachments`**: Files passed to this worker from parent (if delegated)
+- **`custom_tools_path`**: Path to `tools.py` if worker has custom tools
 
 Tools access context via `RunContext[WorkerContext]`:
 
 ```python
+from pydantic_ai import RunContext
+from llm_do import WorkerContext
+
 @agent.tool
 def my_tool(ctx: RunContext[WorkerContext], arg: str) -> str:
-    return ctx.deps.sandbox_toolset.read_text("sandbox", "file.txt")
+    # Access worker definition
+    worker_name = ctx.deps.worker.name
+
+    # Access approval controller
+    result = ctx.deps.approval_controller.maybe_run(
+        "my_tool",
+        {"arg": arg},
+        lambda: perform_operation(arg),
+    )
+    return result
 ```
+
+**Note:** File operations are handled through the `Sandbox` toolset registered automatically. Tools like `read_file`, `write_file`, and `list_files` are available based on the worker's sandbox configuration.
 
 ---
 
@@ -164,7 +199,22 @@ result = controller.maybe_run(
 )
 ```
 
-Session approvals are cached to avoid repeated prompts for the same operation.
+**Features:**
+- Session approval caching to avoid repeated prompts for identical operations
+- Configurable `approval_callback` for custom approval logic
+- Integration with `ToolRule` for per-tool configuration
+
+**Tool Rules:**
+```python
+from llm_do import ToolRule
+
+rule = ToolRule(
+    name="sandbox.write",
+    allowed=True,
+    approval_required=True,
+    description="Write files to output sandbox"
+)
+```
 
 ---
 
@@ -185,18 +235,63 @@ def my_callback(tool_name: str, payload: dict, reason: str) -> ApprovalDecision:
     return ApprovalDecision(
         approved=True,
         approve_for_session=True,  # Don't ask again for same operation
+        note="User approved via CLI",
     )
 ```
+
+**Built-in callbacks:**
+- `approve_all_callback`: Auto-approves all requests (testing, non-interactive)
+- `strict_mode_callback`: Rejects all approval-required tools (production, CI)
 
 ---
 
 ## Module Structure
 
+The runtime is organized into focused modules with clear responsibilities:
+
 ```
 llm_do/
-├── runtime.py      # run_worker, call_worker, create_worker
-├── execution.py    # Agent runners (default_agent_runner, etc.)
-├── approval.py     # ApprovalController
-├── tools.py        # Tool registration
-└── protocols.py    # WorkerDelegator, WorkerCreator protocols
+├── runtime.py           # Worker execution and delegation
+│                        # - run_worker / run_worker_async
+│                        # - call_worker / call_worker_async
+│                        # - create_worker
+│                        # - RuntimeDelegator / RuntimeCreator
+│                        # - Internal helpers: _prepare_worker_context, _handle_result
+│
+├── execution.py         # Agent execution strategies
+│                        # - default_agent_runner (sync wrapper)
+│                        # - default_agent_runner_async (PydanticAI integration)
+│                        # - prepare_agent_execution (context prep)
+│
+├── types.py             # Type definitions and data models
+│                        # - WorkerDefinition, WorkerSpec, WorkerContext
+│                        # - AgentRunner, ApprovalCallback, MessageCallback
+│
+├── approval.py          # Approval enforcement
+│                        # - ApprovalController
+│
+├── tools.py             # Tool registration
+│                        # - register_worker_tools
+│                        # - File tools (read_file, write_file, list_files)
+│                        # - Shell tool (shell)
+│                        # - Delegation tools (worker_call, worker_create)
+│
+├── protocols.py         # Dependency injection protocols
+│                        # - WorkerDelegator, WorkerCreator, FileSandbox
+│
+├── worker_sandbox.py    # Sandbox for worker execution
+│                        # - Sandbox (unified sandbox implementation)
+│                        # - SandboxConfig (paths configuration)
+│                        # - AttachmentValidator (attachment validation)
+│
+└── filesystem_sandbox.py # Reusable filesystem sandbox
+                         # - FileSandboxImpl (core I/O operations)
+                         # - PathConfig (path-level configuration)
 ```
+
+**Architecture highlights:**
+
+- **Separation of concerns**: Runtime orchestration separated from agent execution
+- **Dependency injection**: Protocols enable testability and flexibility
+- **Shared helpers**: `_prepare_worker_context` eliminates ~110 lines of duplication
+- **Async-first**: `run_worker` wraps async implementation for backward compatibility
