@@ -421,3 +421,27 @@ def test_all_example_workers_load_successfully():
     wb_orchestrator_def = whiteboard_registry.load_definition("whiteboard_orchestrator")
     assert wb_orchestrator_def.name == "whiteboard_orchestrator"
     assert wb_orchestrator_def.allow_workers is not None
+
+    # Calculator (in examples/calculator/workers/calculator/worker.yaml)
+    calculator_registry = WorkerRegistry(examples_dir / "calculator")
+    calculator_def = calculator_registry.load_definition("calculator")
+    assert calculator_def.name == "calculator"
+
+    # Code analyzer (in examples/code_analyzer/workers/code_analyzer/worker.yaml)
+    code_analyzer_registry = WorkerRegistry(examples_dir / "code_analyzer")
+    code_analyzer_def = code_analyzer_registry.load_definition("code_analyzer")
+    assert code_analyzer_def.name == "code_analyzer"
+
+    # Web research agent (in examples/web_research_agent/workers/)
+    web_research_registry = WorkerRegistry(examples_dir / "web_research_agent")
+    web_orchestrator_def = web_research_registry.load_definition("web_research_orchestrator")
+    assert web_orchestrator_def.name == "web_research_orchestrator"
+    web_extractor_def = web_research_registry.load_definition("web_research_extractor")
+    assert web_extractor_def.name == "web_research_extractor"
+    web_consolidator_def = web_research_registry.load_definition("web_research_consolidator")
+    assert web_consolidator_def.name == "web_research_consolidator"
+    web_reporter_def = web_research_registry.load_definition("web_research_reporter")
+    assert web_reporter_def.name == "web_research_reporter"
+
+    # Bootstrapping example uses built-in worker_bootstrapper (no local workers to test)
+    # Generated workers in workers/generated/ are created by LLM and may vary

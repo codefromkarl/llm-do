@@ -43,33 +43,29 @@ export MODEL=anthropic:claude-3-5-sonnet-20241022
 
 ## Usage
 
-Run from the llm-do repository root:
-
 ```bash
-# From repo root (not from examples/code_analyzer)
-# Count Python files
-llm-do examples/code_analyzer/workers/code_analyzer "How many Python files are in this codebase?"
+cd examples/code_analyzer
 
-# Analyze code volume
-llm-do examples/code_analyzer/workers/code_analyzer "Count total lines of code in the llm_do/ directory"
+# Analyze the llm-do codebase (commands run from repo root)
+llm-do code_analyzer "How many Python files are in the llm_do/ directory?"
 
-# Find patterns
-llm-do examples/code_analyzer/workers/code_analyzer "Find all TODO comments in Python files"
-
-# Git analysis
-llm-do examples/code_analyzer/workers/code_analyzer "Show the most recent commit"
-
-# Complex query
-llm-do examples/code_analyzer/workers/code_analyzer "What are the largest Python files by line count?"
+# Other queries
+llm-do code_analyzer "Count total lines of code in llm_do/"
+llm-do code_analyzer "Find all TODO comments in Python files"
+llm-do code_analyzer "Show the most recent commit"
+llm-do code_analyzer "What are the largest Python files by line count?"
 ```
+
+**How it works:** Shell commands execute from the repo root (2 dirs up from example), so paths like `llm_do/` work correctly.
 
 ## Example Session
 
 ```
+$ cd examples/code_analyzer
 $ llm-do code_analyzer "How many Python files are in the llm_do/ directory?"
 
 > Using tool: shell
-  Command: find repo/llm_do -name "*.py" -type f
+  Command: find ../../llm_do -name "*.py" -type f
 
 [Lists all Python files]
 
@@ -78,7 +74,10 @@ $ llm-do code_analyzer "How many Python files are in the llm_do/ directory?"
 There are 23 Python files in the llm_do/ directory.
 ```
 
-Note: Pipes are blocked for security, so the agent runs `find` and counts results itself.
+**Key points:**
+- Pipes are blocked for security - agent runs `find` and counts results itself
+- Shell commands execute from the repository root (../../ from example dir)
+- Worker has no write access (read-only analysis only)
 
 ## Key Features
 

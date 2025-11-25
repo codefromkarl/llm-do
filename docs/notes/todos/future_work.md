@@ -101,6 +101,57 @@ Propagate attachment policies when a worker calls another worker.
 
 ---
 
+## Location-Independent Workers
+
+**Source:** code_analyzer example development
+
+Currently workers must be run from their own directory, and shell commands execute from the invocation location. This limits reusability.
+
+### Problem
+- Workers use relative paths that only work from specific directories
+- Shell tool working directory is wherever you invoke llm-do
+- Examples cannot easily be run from arbitrary locations
+- No way to specify "analyze this directory" as a runtime parameter
+
+### Proposed Solutions
+1. **Project root concept**: Add a configurable "project root" that workers can reference
+2. **Configurable working directory**: Let workers specify their shell working directory
+3. **Absolute sandbox paths**: Support both relative and absolute sandbox paths
+4. **Runtime path parameters**: Allow passing paths as input (e.g., `--cwd`, `--project-root`)
+
+### Benefits
+- Run `llm-do code_analyzer` from anywhere, analyze any directory
+- Reusable workers that work across different project structures
+- Better composability and distribution of workers
+
+---
+
+## Sandbox Relative Path Security Review
+
+**Source:** code_analyzer shell tool implementation
+
+The sandbox and shell tools need careful review of relative path handling to prevent escapes.
+
+### Security Concerns
+1. **Shell tool path validation**: Does it properly reject `../../` escapes?
+2. **Sandbox path resolution**: Are relative paths normalized before checking bounds?
+3. **Symlink handling**: Can symlinks escape sandbox boundaries?
+4. **Working directory assumptions**: Shell commands inherit cwd - is this always safe?
+
+### Action Items
+- [ ] Audit `file_sandbox.py` for relative path normalization
+- [ ] Review shell tool's path argument extraction and validation
+- [ ] Test edge cases: `../../`, symlinks, absolute paths in sandboxed contexts
+- [ ] Document safe patterns for shell commands in sandboxes
+- [ ] Consider blocking `..` in shell path arguments entirely when sandbox_paths is set
+
+### Related Code
+- `llm_do/shell.py:extract_path_arguments()`
+- `llm_do/shell.py:validate_paths_in_sandbox()`
+- `llm_do/file_sandbox.py:resolve()`
+
+---
+
 ## Other Ideas (From worker.md)
 
 - First-class Python object with methods like `.run()` or `.delegate_to()`
