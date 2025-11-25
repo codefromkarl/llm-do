@@ -46,9 +46,19 @@ from .types import (
 # Re-export registry
 from .registry import WorkerRegistry
 
-# Re-export runtime functions
+# Re-export approval
+from .approval import ApprovalController
+
+# Re-export protocols
+from .protocols import WorkerCreator, WorkerDelegator
+
+# Re-export tools
+from .tools import load_custom_tools, register_worker_tools
+
+# Re-export runtime functions and implementations
 from .runtime import (
-    ApprovalController,
+    RuntimeCreator,
+    RuntimeDelegator,
     call_worker,
     call_worker_async,
     create_worker,
@@ -80,4 +90,13 @@ __all__: Iterable[str] = [
     "SandboxManager",
     "SandboxToolset",
     "WorkerContext",
+    # Protocols (new in Phase 2)
+    "WorkerCreator",
+    "WorkerDelegator",
+    # Protocol implementations (new in Phase 4)
+    "RuntimeCreator",
+    "RuntimeDelegator",
+    # Tools (new in Phase 2)
+    "load_custom_tools",
+    "register_worker_tools",
 ]

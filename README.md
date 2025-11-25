@@ -135,6 +135,44 @@ Functions in `tools.py` are automatically registered as tools the LLM can call. 
 
 See [`docs/worker_delegation.md`](docs/worker_delegation.md) for detailed design.
 
+## Architecture
+
+llm-do uses a clean, modular architecture with dependency injection to eliminate circular dependencies and maintain clear separation of concerns.
+
+### Core Modules
+
+- **`runtime.py`** (540 lines) — Main orchestration: worker delegation, creation, and execution lifecycle
+- **`protocols.py`** (97 lines) — Interface definitions for dependency injection (`WorkerDelegator`, `WorkerCreator`)
+- **`tools.py`** (282 lines) — Tool registration (sandbox ops, worker delegation, custom tools)
+- **`execution.py`** (278 lines) — Agent runners and execution context preparation
+- **`approval.py`** (76 lines) — Approval enforcement and session tracking
+- **`types.py`** — Type definitions and data models
+- **`registry.py`** — Worker definition loading and persistence
+- **`sandbox.py`** — Sandboxed filesystem operations with security enforcement
+
+### Key Design Patterns
+
+**Protocol-Based Dependency Injection**: Tools depend on abstract protocols rather than concrete implementations, enabling recursive worker calls without circular imports:
+
+```python
+# tools.py depends on protocols (interfaces)
+from .protocols import WorkerDelegator, WorkerCreator
+
+def register_worker_tools(agent, context, delegator: WorkerDelegator, creator: WorkerCreator):
+    # Tools use injected implementations
+    @agent.tool(name="worker_call")
+    async def worker_call_tool(...):
+        return await delegator.call_async(...)
+
+# runtime.py provides concrete implementations
+class RuntimeDelegator:
+    async def call_async(self, worker, input_data, attachments):
+        # Actual worker delegation logic with approval enforcement
+        ...
+```
+
+This architecture achieves clean separation of concerns, with `runtime.py` reduced to 540 lines while maintaining all functionality and zero circular dependencies.
+
 ## Documentation
 
 - **[`docs/concept_spec.md`](docs/concept_spec.md)** — Design philosophy and motivation

@@ -8,6 +8,8 @@ import pytest
 from llm_do import (
     AttachmentPolicy,
     ApprovalController,
+    RuntimeCreator,
+    RuntimeDelegator,
     SandboxConfig,
     SandboxManager,
     SandboxToolset,
@@ -21,7 +23,6 @@ from llm_do import (
     call_worker,
     create_worker,
 )
-from llm_do.runtime import _worker_call_tool, _worker_create_tool
 
 
 def _registry(tmp_path):
@@ -203,7 +204,7 @@ def test_worker_call_tool_respects_approval(monkeypatch, tmp_path):
     monkeypatch.setattr("llm_do.runtime.call_worker", fake_call_worker)
 
     # With default auto-approve callback, the tool executes
-    result = _worker_call_tool(context, worker="child", input_data={"task": "demo"})
+    result = RuntimeDelegator(context).call_sync(worker="child", input_data={"task": "demo"})
 
     # Tool executed successfully
     assert result == {"ok": True}
@@ -226,8 +227,7 @@ def test_worker_call_tool_passes_attachments(monkeypatch, tmp_path):
 
     monkeypatch.setattr("llm_do.runtime.call_worker", fake_call_worker)
 
-    result = _worker_call_tool(
-        context,
+    result = RuntimeDelegator(context).call_sync(
         worker="child",
         input_data={"task": "demo"},
         attachments=["input/deck.pdf"],
@@ -251,8 +251,7 @@ def test_worker_call_tool_rejects_disallowed_sandbox_attachment(tmp_path):
     disallowed.write_text("memo", encoding="utf-8")
 
     with pytest.raises(PermissionError):
-        _worker_call_tool(
-            context,
+        RuntimeDelegator(context).call_sync(
             worker="child",
             input_data={"task": "demo"},
             attachments=["input/note.txt"],
@@ -270,8 +269,7 @@ def test_worker_call_tool_parent_policy_suffix(tmp_path):
     pdf_path.write_text("memo", encoding="utf-8")
 
     with pytest.raises(ValueError):
-        _worker_call_tool(
-            context,
+        RuntimeDelegator(context).call_sync(
             worker="child",
             input_data={"task": "demo"},
             attachments=["input/deck.pdf"],
@@ -290,8 +288,7 @@ def test_worker_call_tool_parent_policy_counts(tmp_path):
         path.write_text("memo", encoding="utf-8")
 
     with pytest.raises(ValueError):
-        _worker_call_tool(
-            context,
+        RuntimeDelegator(context).call_sync(
             worker="child",
             input_data={"task": "demo"},
             attachments=["input/deck-0.pdf", "input/deck-1.pdf"],
@@ -309,8 +306,7 @@ def test_worker_call_tool_parent_policy_bytes(tmp_path):
     path.write_text("12345", encoding="utf-8")
 
     with pytest.raises(ValueError):
-        _worker_call_tool(
-            context,
+        RuntimeDelegator(context).call_sync(
             worker="child",
             input_data={"task": "demo"},
             attachments=["input/deck.pdf"],
@@ -326,8 +322,7 @@ def test_worker_call_tool_rejects_path_escape(tmp_path):
     outside.write_text("memo", encoding="utf-8")
 
     with pytest.raises(PermissionError):
-        _worker_call_tool(
-            context,
+        RuntimeDelegator(context).call_sync(
             worker="child",
             input_data={"task": "demo"},
             attachments=["input/../secret.pdf"],
@@ -356,8 +351,7 @@ def test_worker_call_tool_includes_attachment_metadata(monkeypatch, tmp_path):
     context.approval_controller.maybe_run = fake_maybe_run
     monkeypatch.setattr("llm_do.runtime.call_worker", fake_call_worker)
 
-    result = _worker_call_tool(
-        context,
+    result = RuntimeDelegator(context).call_sync(
         worker="child",
         input_data={"task": "demo"},
         attachments=["input/deck.pdf"],
@@ -377,8 +371,7 @@ def test_worker_create_tool_persists_definition(tmp_path):
     registry.save_definition(parent)
     context = _parent_context(registry, parent)
 
-    payload = _worker_create_tool(
-        context,
+    payload = RuntimeCreator(context).create(
         name="child",
         instructions="delegate",
         description="desc",
@@ -416,7 +409,7 @@ def test_worker_create_tool_respects_approval(monkeypatch, tmp_path):
     monkeypatch.setattr("llm_do.runtime.create_worker", fake_create_worker)
 
     # With default auto-approve callback, the tool executes
-    result = _worker_create_tool(context, name="child", instructions="demo")
+    result = RuntimeCreator(context).create(name="child", instructions="demo")
 
     # Tool executed successfully
     assert result["name"] == "child"

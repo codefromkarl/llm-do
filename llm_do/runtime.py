@@ -24,7 +24,11 @@ from pydantic_ai.messages import BinaryContent
 from pydantic_ai.models import Model as PydanticAIModel
 from pydantic_ai.tools import RunContext
 
+from .approval import ApprovalController
+from .execution import default_agent_runner_async, default_agent_runner, prepare_agent_execution
+from .protocols import WorkerCreator, WorkerDelegator
 from .sandbox import AttachmentInput, AttachmentPayload, SandboxManager, SandboxToolset
+from .tools import register_worker_tools
 from .types import (
     AgentExecutionContext,
     AgentRunner,
@@ -44,277 +48,138 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Approval controller
+# Protocol implementations for dependency injection
 # ---------------------------------------------------------------------------
 
 
-class ApprovalController:
-    """Apply tool rules with blocking approval prompts."""
+class RuntimeDelegator:
+    """Concrete implementation of WorkerDelegator protocol.
 
-    def __init__(
-        self,
-        tool_rules: Mapping[str, Any],  # ToolRule from types
-        *,
-        approval_callback: ApprovalCallback = _auto_approve_callback,
-    ):
-        self.tool_rules = tool_rules
-        self.approval_callback = approval_callback
-        self.session_approvals: set[tuple[str, frozenset]] = set()
-
-    def _make_approval_key(self, tool_name: str, payload: Mapping[str, Any]) -> tuple[str, frozenset]:
-        """Create a hashable key for session approval tracking."""
-        try:
-            items = frozenset(payload.items())
-        except TypeError:
-            # If payload has unhashable values, use repr as fallback
-            items = frozenset((k, repr(v)) for k, v in payload.items())
-        return (tool_name, items)
-
-    def maybe_run(
-        self,
-        tool_name: str,
-        payload: Mapping[str, Any],
-        func: Callable[[], Any],
-    ) -> Any:
-        rule = self.tool_rules.get(tool_name)
-        if rule:
-            if not rule.allowed:
-                raise PermissionError(f"Tool '{tool_name}' is disallowed")
-            if rule.approval_required:
-                # Check session approvals
-                key = self._make_approval_key(tool_name, payload)
-                if key in self.session_approvals:
-                    return func()
-
-                # Block and wait for approval
-                decision = self.approval_callback(tool_name, payload, rule.description)
-                if not decision.approved:
-                    note = f": {decision.note}" if decision.note else ""
-                    raise PermissionError(f"User rejected tool call '{tool_name}'{note}")
-
-                # Track session approval if requested
-                if decision.approve_for_session:
-                    self.session_approvals.add(key)
-
-        return func()
-
-
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
-
-def _model_supports_streaming(model: ModelLike) -> bool:
-    """Return True if the configured model supports streaming callbacks."""
-
-    if isinstance(model, str):
-        # Assume vendor-provided identifiers support streaming
-        return True
-
-    # When the caller passes a Model subclass, only opt into streaming if the
-    # subclass overrides request_stream. Comparing attribute identity avoids
-    # invoking the method (which could raise NotImplementedError).
-    base_stream = getattr(PydanticAIModel, "request_stream", None)
-    model_stream = getattr(type(model), "request_stream", None)
-    if base_stream is None or model_stream is None:
-        return False
-    return model_stream is not base_stream
-
-
-def _format_user_prompt(user_input: Any) -> str:
-    """Serialize user input into a prompt string for the agent."""
-
-    if isinstance(user_input, str):
-        return user_input
-    return json.dumps(user_input, indent=2, sort_keys=True)
-
-
-def _prepare_agent_execution(
-    definition: WorkerDefinition,
-    user_input: Any,
-    context: WorkerContext,
-    output_model: Optional[Type[BaseModel]],
-) -> AgentExecutionContext:
-    """Prepare everything needed for agent execution (sync or async).
-
-    This extracts all the setup logic that's common between sync and async
-    agent runners, including:
-    - Building the prompt with attachments
-    - Setting up streaming callbacks
-    - Preparing agent kwargs
-    - Initializing status tracking
-
-    Args:
-        definition: Worker definition with instructions and configuration
-        user_input: Input data for the worker
-        context: Worker execution context with tools and dependencies
-        output_model: Optional Pydantic model for structured output
-
-    Returns:
-        AgentExecutionContext with all prepared state for agent execution
-    """
-    if context.effective_model is None:
-        raise ValueError(
-            f"No model configured for worker '{definition.name}'. "
-            "Set worker.model, pass --model, or provide a custom agent_runner."
-        )
-
-    # Build user prompt with attachments
-    prompt_text = _format_user_prompt(user_input)
-    attachment_labels = [item.display_name for item in context.attachments]
-
-    if context.attachments:
-        # Create a list of UserContent with text + file attachments
-        user_content: List[Union[str, BinaryContent]] = [prompt_text]
-        for attachment in context.attachments:
-            binary_content = BinaryContent.from_path(attachment.path)
-            user_content.append(binary_content)
-        prompt = user_content
-    else:
-        # Just text, no attachments
-        prompt = prompt_text
-
-    # Setup callbacks and status tracking
-    event_handler = None
-    model_label: Optional[str] = None
-    started_at: Optional[float] = None
-    emit_status: Optional[Callable[[str, Optional[float]], None]] = None
-
-    if context.message_callback:
-        preview = {
-            "instructions": definition.instructions or "",
-            "user_input": prompt_text,
-            "attachments": attachment_labels,
-        }
-        context.message_callback(
-            [{"worker": definition.name, "initial_request": preview}]
-        )
-
-        def _emit_model_status(state: str, *, duration: Optional[float] = None) -> None:
-            if not context.message_callback:
-                return
-            status: Dict[str, Any] = {
-                "phase": "model_request",
-                "state": state,
-            }
-            if model_label:
-                status["model"] = model_label
-            if duration is not None:
-                status["duration_sec"] = duration
-            context.message_callback(
-                [{"worker": definition.name, "status": status}]
-            )
-
-        if _model_supports_streaming(context.effective_model):
-            # Note: The stream handler must be thread-safe since it will be called
-            # from within the agent's event loop
-            async def _stream_handler(
-                run_ctx: RunContext[WorkerContext], event_stream
-            ) -> None:  # pragma: no cover - exercised indirectly via integration tests
-                async for event in event_stream:
-                    # Call message_callback in a thread-safe way
-                    try:
-                        context.message_callback(
-                            [{"worker": definition.name, "event": event}]
-                        )
-                    except Exception as e:
-                        # Log but don't crash on callback errors
-                        logger.exception("Error in stream handler callback: %s", e)
-
-            event_handler = _stream_handler
-
-        if isinstance(context.effective_model, str):
-            model_label = context.effective_model
-        elif context.effective_model is not None:
-            model_label = (
-                getattr(context.effective_model, "model_name", None)
-                or context.effective_model.__class__.__name__
-            )
-
-        started_at = perf_counter()
-        emit_status = _emit_model_status
-        emit_status("start")
-
-    # Prepare agent kwargs
-    # PydanticAI expects the system prompt under the "instructions" parameter,
-    # so even though WorkerDefinition refers to it as the worker's system
-    # prompt, we keep passing it under that legacy keyword here.
-    agent_kwargs: Dict[str, Any] = dict(
-        model=context.effective_model,
-        instructions=definition.instructions,
-        name=definition.name,
-        deps_type=WorkerContext,
-    )
-    if output_model is not None:
-        agent_kwargs["output_type"] = output_model
-
-    return AgentExecutionContext(
-        prompt=prompt,
-        agent_kwargs=agent_kwargs,
-        event_handler=event_handler,
-        model_label=model_label,
-        started_at=started_at,
-        emit_status=emit_status,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tool registration and implementations
-# ---------------------------------------------------------------------------
-
-
-def _register_worker_tools(agent: Agent, context: WorkerContext) -> None:
-    """Expose built-in llm-do helpers and custom tools as PydanticAI tools.
-
-    Registers:
-    1. Built-in tools (sandbox_*, worker_call, worker_create)
-    2. Custom tools from tools.py if available
+    This handles worker delegation with approval enforcement and attachment validation.
+    Injected into tools to enable recursive worker calls without circular imports.
     """
 
-    @agent.tool(name="sandbox_list", description="List files within a sandbox using a glob pattern")
-    def sandbox_list(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        pattern: str = "**/*",
-    ) -> List[str]:
-        return ctx.deps.sandbox_toolset.list(sandbox, pattern)
+    def __init__(self, context: WorkerContext):
+        self.context = context
 
-    @agent.tool(name="sandbox_read_text", description="Read UTF-8 text from a sandboxed file. Do not use this on binary files (PDFs, images, etc) - pass them as attachments instead.")
-    def sandbox_read_text(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        path: str,
-        *,
-        max_chars: int = 200_000,
-    ) -> str:
-        return ctx.deps.sandbox_toolset.read_text(sandbox, path, max_chars=max_chars)
-
-    @agent.tool(name="sandbox_write_text", description="Write UTF-8 text to a sandboxed file")
-    def sandbox_write_text(
-        ctx: RunContext[WorkerContext],
-        sandbox: str,
-        path: str,
-        content: str,
-    ) -> Optional[str]:
-        return ctx.deps.sandbox_toolset.write_text(sandbox, path, content)
-
-    @agent.tool(name="worker_call", description="Delegate to another registered worker")
-    async def worker_call_tool(
-        ctx: RunContext[WorkerContext],
+    async def call_async(
+        self,
         worker: str,
         input_data: Any = None,
         attachments: Optional[List[str]] = None,
     ) -> Any:
-        return await _worker_call_tool_async(
-            ctx.deps,
-            worker=worker,
-            input_data=input_data,
-            attachments=attachments,
+        """Async worker delegation with approval enforcement."""
+        resolved_attachments: List[Path]
+        attachment_metadata: List[Dict[str, Any]]
+        if attachments:
+            resolved_attachments, attachment_metadata = self.context.validate_attachments(attachments)
+        else:
+            resolved_attachments, attachment_metadata = ([], [])
+
+        attachment_payloads: Optional[List[AttachmentPayload]] = None
+        if resolved_attachments:
+            attachment_payloads = [
+                AttachmentPayload(
+                    path=path,
+                    display_name=f"{meta['sandbox']}/{meta['path']}",
+                )
+                for path, meta in zip(resolved_attachments, attachment_metadata)
+            ]
+
+        async def _invoke() -> Any:
+            result = await call_worker_async(
+                registry=self.context.registry,
+                worker=worker,
+                input_data=input_data,
+                caller_context=self.context,
+                attachments=attachment_payloads,
+            )
+            return result.output
+
+        payload: Dict[str, Any] = {"worker": worker}
+        if attachment_metadata:
+            payload["attachments"] = attachment_metadata
+
+        # Check approval first (synchronously)
+        rule = self.context.approval_controller.tool_rules.get("worker.call")
+        if rule:
+            if not rule.allowed:
+                raise PermissionError(f"Tool 'worker.call' is disallowed")
+            if rule.approval_required:
+                # Check session approvals
+                key = self.context.approval_controller._make_approval_key("worker.call", payload)
+                if key not in self.context.approval_controller.session_approvals:
+                    # Block and wait for approval
+                    decision = self.context.approval_controller.approval_callback(
+                        "worker.call", payload, rule.description
+                    )
+                    if not decision.approved:
+                        note = f": {decision.note}" if decision.note else ""
+                        raise PermissionError(f"User rejected tool call 'worker.call'{note}")
+                    # Track session approval if requested
+                    if decision.approve_for_session:
+                        self.context.approval_controller.session_approvals.add(key)
+
+        # Now execute async
+        return await _invoke()
+
+    def call_sync(
+        self,
+        worker: str,
+        input_data: Any = None,
+        attachments: Optional[List[str]] = None,
+    ) -> Any:
+        """Sync worker delegation with approval enforcement."""
+        resolved_attachments: List[Path]
+        attachment_metadata: List[Dict[str, Any]]
+        if attachments:
+            resolved_attachments, attachment_metadata = self.context.validate_attachments(attachments)
+        else:
+            resolved_attachments, attachment_metadata = ([], [])
+
+        attachment_payloads: Optional[List[AttachmentPayload]] = None
+        if resolved_attachments:
+            attachment_payloads = [
+                AttachmentPayload(
+                    path=path,
+                    display_name=f"{meta['sandbox']}/{meta['path']}",
+                )
+                for path, meta in zip(resolved_attachments, attachment_metadata)
+            ]
+
+        def _invoke() -> Any:
+            result = call_worker(
+                registry=self.context.registry,
+                worker=worker,
+                input_data=input_data,
+                caller_context=self.context,
+                attachments=attachment_payloads,
+            )
+            return result.output
+
+        payload: Dict[str, Any] = {"worker": worker}
+        if attachment_metadata:
+            payload["attachments"] = attachment_metadata
+
+        return self.context.approval_controller.maybe_run(
+            "worker.call",
+            payload,
+            _invoke,
         )
 
-    @agent.tool(name="worker_create", description="Persist a new worker definition using the active profile")
-    def worker_create_tool(
-        ctx: RunContext[WorkerContext],
+
+class RuntimeCreator:
+    """Concrete implementation of WorkerCreator protocol.
+
+    Handles worker creation with approval enforcement.
+    Injected into tools to enable the worker_create tool.
+    """
+
+    def __init__(self, context: WorkerContext):
+        self.context = context
+
+    def create(
+        self,
         name: str,
         instructions: str,
         description: Optional[str] = None,
@@ -322,365 +187,29 @@ def _register_worker_tools(agent: Agent, context: WorkerContext) -> None:
         output_schema_ref: Optional[str] = None,
         force: bool = False,
     ) -> Dict[str, Any]:
-        return _worker_create_tool(
-            ctx.deps,
+        """Create worker with approval enforcement."""
+        spec = WorkerSpec(
             name=name,
             instructions=instructions,
             description=description,
             model=model,
             output_schema_ref=output_schema_ref,
-            force=force,
         )
 
-    # Load and register custom tools if available
-    if context.custom_tools_path:
-        _load_custom_tools(agent, context)
-
-
-def _load_custom_tools(agent: Agent, context: WorkerContext) -> None:
-    """Load and register custom tools from tools.py module.
-
-    Custom tools are functions defined in the tools.py file in the worker's directory.
-    Only functions explicitly listed in the worker's tool_rules are registered.
-    Each tool call is wrapped with the approval controller to enforce security policies.
-
-    Security guarantees:
-    - Only functions listed in definition.tool_rules are registered (allowlist)
-    - All tool calls go through approval_controller.maybe_run() (approval enforcement)
-    - Tool rules (allowed, approval_required) are respected
-    """
-    import importlib.util
-    import sys
-    import inspect
-    from functools import wraps
-
-    tools_path = context.custom_tools_path
-    if not tools_path or not tools_path.exists():
-        return
-
-    # Load the module from the file path
-    spec = importlib.util.spec_from_file_location(f"{context.worker.name}_tools", tools_path)
-    if spec is None or spec.loader is None:
-        logger.warning(f"Could not load custom tools from {tools_path}")
-        return
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-
-    try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        logger.error(f"Error loading custom tools from {tools_path}: {e}")
-        return
-
-    # Only register functions that are explicitly allowed in tool_rules
-    allowed_tools = {
-        name: rule
-        for name, rule in context.worker.tool_rules.items()
-        if rule.allowed
-    }
-
-    if not allowed_tools:
-        logger.debug(f"No custom tools allowed in tool_rules for {context.worker.name}")
-        return
-
-    # Find and register allowed functions from the module
-    for tool_name, tool_rule in allowed_tools.items():
-        # Check if this tool exists in the module
-        if not hasattr(module, tool_name):
-            continue
-
-        obj = getattr(module, tool_name)
-        if not (callable(obj) and inspect.isfunction(obj) and obj.__module__ == module.__name__):
-            logger.warning(f"Custom tool '{tool_name}' is not a function in {tools_path}")
-            continue
-
-        # Wrap the function to enforce approval via the approval controller
-        # This ensures tool_rules.approval_required is respected
-        def make_wrapped_tool(func, name):
-            """Create a wrapped tool that goes through approval controller."""
-            # Get the original function's signature
-            orig_sig = inspect.signature(func)
-            orig_params = list(orig_sig.parameters.values())
-
-            # Build new parameters list: ctx first, then original params
-            new_params = [
-                inspect.Parameter(
-                    'ctx',
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    annotation=RunContext[WorkerContext]
-                )
-            ]
-            # Add copies of original parameters
-            for param in orig_params:
-                new_params.append(
-                    inspect.Parameter(
-                        param.name,
-                        param.kind,
-                        default=param.default,
-                        annotation=param.annotation
-                    )
-                )
-
-            # Create new signature with ctx added
-            new_sig = inspect.Signature(parameters=new_params, return_annotation=orig_sig.return_annotation)
-
-            # Create wrapper function
-            def wrapped_tool(ctx, **tool_kwargs):
-                """Wrapped custom tool that enforces approval rules."""
-                def _invoke():
-                    # Call the original function with the tool arguments
-                    return func(**tool_kwargs)
-
-                # Use approval controller to enforce tool_rules
-                return ctx.deps.approval_controller.maybe_run(
-                    name,
-                    tool_kwargs,
-                    _invoke,
-                )
-
-            # Apply the new signature and preserve metadata
-            wrapped_tool.__signature__ = new_sig
-            wrapped_tool.__name__ = func.__name__
-            wrapped_tool.__doc__ = func.__doc__
-            wrapped_tool.__annotations__ = {
-                'ctx': RunContext[WorkerContext],
-                **func.__annotations__,
-                'return': func.__annotations__.get('return', orig_sig.return_annotation)
-            }
-
-            return wrapped_tool
-
-        try:
-            # Create wrapped version that enforces approvals
-            wrapped = make_wrapped_tool(obj, tool_name)
-
-            # Register using agent.tool (not tool_plain) since we need RunContext for approval
-            agent.tool(
-                name=tool_name,
-                description=obj.__doc__ or tool_rule.description or f"Custom tool: {tool_name}"
-            )(wrapped)
-
-            logger.debug(f"Registered custom tool with approval enforcement: {tool_name}")
-        except Exception as e:
-            logger.warning(f"Could not register custom tool '{tool_name}': {e}")
-
-
-async def _worker_call_tool_async(
-    ctx: WorkerContext,
-    *,
-    worker: str,
-    input_data: Any = None,
-    attachments: Optional[List[str]] = None,
-) -> Any:
-    """Async version of worker call tool - calls call_worker_async to avoid hangs."""
-    resolved_attachments: List[Path]
-    attachment_metadata: List[Dict[str, Any]]
-    if attachments:
-        resolved_attachments, attachment_metadata = ctx.validate_attachments(attachments)
-    else:
-        resolved_attachments, attachment_metadata = ([], [])
-
-    attachment_payloads: Optional[List[AttachmentPayload]] = None
-    if resolved_attachments:
-        attachment_payloads = [
-            AttachmentPayload(
-                path=path,
-                display_name=f"{meta['sandbox']}/{meta['path']}",
+        def _invoke() -> Dict[str, Any]:
+            created = create_worker(
+                registry=self.context.registry,
+                spec=spec,
+                defaults=self.context.creation_defaults,
+                force=force,
             )
-            for path, meta in zip(resolved_attachments, attachment_metadata)
-        ]
+            return created.model_dump(mode="json")
 
-    async def _invoke() -> Any:
-        result = await call_worker_async(
-            registry=ctx.registry,
-            worker=worker,
-            input_data=input_data,
-            caller_context=ctx,
-            attachments=attachment_payloads,
+        return self.context.approval_controller.maybe_run(
+            "worker.create",
+            {"worker": name},
+            _invoke,
         )
-        return result.output
-
-    payload: Dict[str, Any] = {"worker": worker}
-    if attachment_metadata:
-        payload["attachments"] = attachment_metadata
-
-    # Check approval first (synchronously)
-    rule = ctx.approval_controller.tool_rules.get("worker.call")
-    if rule:
-        if not rule.allowed:
-            raise PermissionError(f"Tool 'worker.call' is disallowed")
-        if rule.approval_required:
-            # Check session approvals
-            key = ctx.approval_controller._make_approval_key("worker.call", payload)
-            if key not in ctx.approval_controller.session_approvals:
-                # Block and wait for approval
-                decision = ctx.approval_controller.approval_callback("worker.call", payload, rule.description)
-                if not decision.approved:
-                    note = f": {decision.note}" if decision.note else ""
-                    raise PermissionError(f"User rejected tool call 'worker.call'{note}")
-                # Track session approval if requested
-                if decision.approve_for_session:
-                    ctx.approval_controller.session_approvals.add(key)
-
-    # Now execute async
-    return await _invoke()
-
-
-def _worker_call_tool(
-    ctx: WorkerContext,
-    *,
-    worker: str,
-    input_data: Any = None,
-    attachments: Optional[List[str]] = None,
-) -> Any:
-    """Sync version of worker call tool - kept for backward compatibility."""
-    resolved_attachments: List[Path]
-    attachment_metadata: List[Dict[str, Any]]
-    if attachments:
-        resolved_attachments, attachment_metadata = ctx.validate_attachments(attachments)
-    else:
-        resolved_attachments, attachment_metadata = ([], [])
-
-    attachment_payloads: Optional[List[AttachmentPayload]] = None
-    if resolved_attachments:
-        attachment_payloads = [
-            AttachmentPayload(
-                path=path,
-                display_name=f"{meta['sandbox']}/{meta['path']}",
-            )
-            for path, meta in zip(resolved_attachments, attachment_metadata)
-        ]
-
-    def _invoke() -> Any:
-        result = call_worker(
-            registry=ctx.registry,
-            worker=worker,
-            input_data=input_data,
-            caller_context=ctx,
-            attachments=attachment_payloads,
-        )
-        return result.output
-
-    payload: Dict[str, Any] = {"worker": worker}
-    if attachment_metadata:
-        payload["attachments"] = attachment_metadata
-
-    return ctx.approval_controller.maybe_run(
-        "worker.call",
-        payload,
-        _invoke,
-    )
-
-
-def _worker_create_tool(
-    ctx: WorkerContext,
-    *,
-    name: str,
-    instructions: str,
-    description: Optional[str] = None,
-    model: Optional[str] = None,
-    output_schema_ref: Optional[str] = None,
-    force: bool = False,
-) -> Dict[str, Any]:
-    spec = WorkerSpec(
-        name=name,
-        instructions=instructions,
-        description=description,
-        model=model,
-        output_schema_ref=output_schema_ref,
-    )
-
-    def _invoke() -> Dict[str, Any]:
-        created = create_worker(
-            registry=ctx.registry,
-            spec=spec,
-            defaults=ctx.creation_defaults,
-            force=force,
-        )
-        return created.model_dump(mode="json")
-
-    return ctx.approval_controller.maybe_run(
-        "worker.create",
-        {"worker": name},
-        _invoke,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Agent runners (sync and async)
-# ---------------------------------------------------------------------------
-
-
-async def _default_agent_runner_async(
-    definition: WorkerDefinition,
-    user_input: Any,
-    context: WorkerContext,
-    output_model: Optional[Type[BaseModel]],
-) -> tuple[Any, List[Any]]:
-    """Async version of the default agent runner.
-
-    This is the core async implementation that directly awaits agent.run().
-    The sync version wraps this with asyncio.run().
-
-    Args:
-        definition: Worker definition with instructions and configuration
-        user_input: Input data for the worker
-        context: Worker execution context with tools and dependencies
-        output_model: Optional Pydantic model for structured output
-
-    Returns:
-        Tuple of (output, messages) where messages is the list of all messages
-        exchanged with the LLM during execution.
-    """
-    # Prepare execution context (prompt, callbacks, agent kwargs)
-    exec_ctx = _prepare_agent_execution(definition, user_input, context, output_model)
-
-    # Create Agent
-    agent = Agent(**exec_ctx.agent_kwargs)
-    _register_worker_tools(agent, context)
-
-    # Run the agent asynchronously
-    run_result = await agent.run(
-        exec_ctx.prompt,
-        deps=context,
-        event_stream_handler=exec_ctx.event_handler,
-    )
-
-    if exec_ctx.emit_status is not None and exec_ctx.started_at is not None:
-        exec_ctx.emit_status("end", duration=round(perf_counter() - exec_ctx.started_at, 2))
-
-    # Extract all messages from the result
-    messages = run_result.all_messages() if hasattr(run_result, 'all_messages') else []
-
-    return (run_result.output, messages)
-
-
-def _default_agent_runner(
-    definition: WorkerDefinition,
-    user_input: Any,
-    context: WorkerContext,
-    output_model: Optional[Type[BaseModel]],
-) -> tuple[Any, List[Any]]:
-    """Synchronous wrapper around the async agent runner.
-
-    This provides backward compatibility for synchronous code that calls
-    run_worker(). It simply wraps the async implementation with asyncio.run().
-
-    Args:
-        definition: Worker definition with instructions and configuration
-        user_input: Input data for the worker
-        context: Worker execution context with tools and dependencies
-        output_model: Optional Pydantic model for structured output
-
-    Returns:
-        Tuple of (output, messages) where messages is the list of all messages
-        exchanged with the LLM during execution.
-    """
-    # Simply wrap the async version with asyncio.run()
-    return asyncio.run(
-        _default_agent_runner_async(definition, user_input, context, output_model)
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -695,7 +224,7 @@ def call_worker(
     *,
     caller_context: WorkerContext,
     attachments: Optional[Sequence[AttachmentInput]] = None,
-    agent_runner: AgentRunner = _default_agent_runner,
+    agent_runner: Optional[AgentRunner] = None,
 ) -> WorkerRunResult:
     """Delegate to another worker (sync version)."""
     allowed = caller_context.worker.allow_workers
@@ -866,9 +395,18 @@ async def run_worker_async(
 
     output_model = registry.resolve_output_schema(definition)
 
+    # Create a closure for tool registration using protocol implementations
+    def _register_tools_for_worker(agent, ctx):
+        delegator = RuntimeDelegator(ctx)
+        creator = RuntimeCreator(ctx)
+        register_worker_tools(agent, ctx, delegator, creator)
+
     # Use the provided agent_runner or default to the async version
     if agent_runner is None:
-        result = await _default_agent_runner_async(definition, input_data, context, output_model)
+        result = await default_agent_runner_async(
+            definition, input_data, context, output_model,
+            register_tools_fn=_register_tools_for_worker
+        )
     else:
         # Support both sync and async agent runners
         if inspect.iscoroutinefunction(agent_runner):
@@ -900,7 +438,7 @@ def run_worker(
     caller_effective_model: Optional[ModelLike] = None,
     cli_model: Optional[ModelLike] = None,
     creation_defaults: Optional[WorkerCreationDefaults] = None,
-    agent_runner: AgentRunner = _default_agent_runner,
+    agent_runner: Optional[AgentRunner] = None,
     approval_callback: ApprovalCallback = _auto_approve_callback,
     message_callback: Optional[MessageCallback] = None,
 ) -> WorkerRunResult:
@@ -970,10 +508,22 @@ def run_worker(
 
     output_model = registry.resolve_output_schema(definition)
 
+    # Create a closure for tool registration using protocol implementations
+    def _register_tools_for_worker(agent, ctx):
+        delegator = RuntimeDelegator(ctx)
+        creator = RuntimeCreator(ctx)
+        register_worker_tools(agent, ctx, delegator, creator)
+
     # Real agent integration would expose toolsets to the model here. The base
     # implementation simply forwards to the agent runner with the constructed
     # context.
-    result = agent_runner(definition, input_data, context, output_model)
+    if agent_runner is None:
+        result = default_agent_runner(
+            definition, input_data, context, output_model,
+            register_tools_fn=_register_tools_for_worker
+        )
+    else:
+        result = agent_runner(definition, input_data, context, output_model)
 
     # Handle both old-style (output only) and new-style (output, messages) returns
     if isinstance(result, tuple) and len(result) == 2:
