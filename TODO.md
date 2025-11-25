@@ -2,7 +2,8 @@
 
 ## CLI enhancements
 
-- [ ] Add `--set key=value` or `--override JSON` to override any worker config from command line (sandbox paths, model, allow_workers, tool_rules, etc.)
+- [x] **Phase 1 (MVP)**: Add `--set KEY=VALUE` for simple runtime config overrides with dot notation and type inference. See `docs/cli.md` for usage.
+- [ ] **Phase 2 & 3**: Add `--override JSON` for complex overrides, list operators (`+=`, `-=`), override profiles, and validation mode. See `docs/notes/todos/future_work.md` for details.
 
 ## Runtime polish
 

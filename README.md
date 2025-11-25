@@ -66,6 +66,11 @@ Run it:
 cd examples/pitchdeck_eval
 
 llm-do pitch_evaluator --attachments input/deck.pdf --model $MODEL
+
+# Or override configuration at runtime
+llm-do pitch_evaluator --attachments input/deck.pdf \
+  --set model=anthropic:claude-sonnet-4 \
+  --set attachment_policy.max_total_bytes=20000000
 ```
 
 **Note:** This example requires a model with native PDF reading (e.g., Anthropic Claude models). Not all models support PDF attachments.
@@ -88,6 +93,7 @@ Check the `examples/` directory for additional patterns:
 - **Autonomous worker creation**: Let workers draft new worker definitions (requires approval)
 - **Jinja2 templating**: Include files and compose prompts with `{{ file() }}` and `{% include %}`
 - **Model flexibility**: Specify models per-worker or override at runtime with `--model`
+- **Runtime configuration**: Override any worker config field with `--set` without editing YAML files
 
 ## How It Works
 
@@ -175,6 +181,7 @@ This architecture achieves clean separation of concerns, with `runtime.py` reduc
 
 ## Documentation
 
+- **[`docs/cli.md`](docs/cli.md)** — CLI reference and configuration overrides
 - **[`docs/concept_spec.md`](docs/concept_spec.md)** — Design philosophy and motivation
 - **[`docs/worker_delegation.md`](docs/worker_delegation.md)** — Worker-to-worker delegation
 - **[`examples/greeter/README.md`](examples/greeter/README.md)** — Simple greeter example

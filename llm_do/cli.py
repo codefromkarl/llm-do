@@ -41,6 +41,7 @@ from .base import (
     approve_all_callback,
     strict_mode_callback,
 )
+from .config_overrides import apply_cli_overrides
 from .cli_display import (
     display_worker_request,
     display_worker_status,
@@ -251,6 +252,16 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=False,
         help="Show full stack traces on errors (for debugging)",
     )
+    parser.add_argument(
+        "--set",
+        action="append",
+        dest="config_overrides",
+        metavar="KEY=VALUE",
+        default=None,
+        help="Override worker config field (e.g., --set model=openai:gpt-4o). "
+             "Supports dot notation for nested fields (e.g., --set sandbox.network_enabled=false). "
+             "Can be specified multiple times.",
+    )
     return parser.parse_args(argv)
 
 
@@ -276,6 +287,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             registry_root = args.registry
 
         registry = WorkerRegistry(registry_root)
+
+        # Load worker definition
+        definition = registry.load_definition(worker_name)
+
+        # Apply CLI overrides if provided
+        if args.config_overrides:
+            try:
+                definition = apply_cli_overrides(
+                    definition,
+                    set_overrides=args.config_overrides,
+                )
+                # Show what was overridden in debug mode
+                if args.debug and not args.json:
+                    console.print(
+                        f"[dim]Applied {len(args.config_overrides)} --set override(s)[/dim]"
+                    )
+            except ValueError as e:
+                print(f"Configuration override error: {e}", file=sys.stderr)
+                return 1
+
+            # Temporarily inject overridden definition into registry
+            # This allows run_worker to use our modified version
+            registry._definitions_cache = {worker_name: definition}
 
         # Determine input data
         if args.input_json is not None:
