@@ -95,7 +95,7 @@ Check the `examples/` directory for additional patterns:
 - `name`: Worker identifier
 - `description`: What the worker does
 - `model`: Which LLM to use (optional, can override with `--model`)
-- `instructions`: The prompt (inline or from `prompts/{name}.jinja2`)
+- `instructions`: System prompt used when the worker executes (inline or from `prompts/{name}.jinja2`)
 - `sandboxes`: Which directories to access (read/write permissions, file filters)
 - `tool_rules`: Which tools require approval
 - `worker_creation_policy`: Can this worker create new workers?
