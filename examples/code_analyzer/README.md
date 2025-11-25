@@ -43,25 +43,24 @@ export MODEL=anthropic:claude-3-5-sonnet-20241022
 
 ## Usage
 
-Run from the llm-do repository root to analyze the codebase itself:
+Run from the llm-do repository root:
 
 ```bash
-cd examples/code_analyzer
-
+# From repo root (not from examples/code_analyzer)
 # Count Python files
-llm-do code_analyzer "How many Python files are in this codebase?"
+llm-do examples/code_analyzer/workers/code_analyzer "How many Python files are in this codebase?"
 
 # Analyze code volume
-llm-do code_analyzer "Count total lines of code in the llm_do/ directory"
+llm-do examples/code_analyzer/workers/code_analyzer "Count total lines of code in the llm_do/ directory"
 
 # Find patterns
-llm-do code_analyzer "Find all TODO comments in Python files"
+llm-do examples/code_analyzer/workers/code_analyzer "Find all TODO comments in Python files"
 
 # Git analysis
-llm-do code_analyzer "Show the most recent commit"
+llm-do examples/code_analyzer/workers/code_analyzer "Show the most recent commit"
 
 # Complex query
-llm-do code_analyzer "What are the largest Python files by line count?"
+llm-do examples/code_analyzer/workers/code_analyzer "What are the largest Python files by line count?"
 ```
 
 ## Example Session

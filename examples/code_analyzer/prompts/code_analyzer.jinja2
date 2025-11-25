@@ -17,17 +17,17 @@ IMPORTANT SECURITY RESTRICTIONS:
 - Use `sandbox_read` to read files if needed for analysis
 
 When analyzing code:
-1. Start from the `repo` sandbox which points to the repository root
-2. Use `find repo/ -name "*.py"` to locate relevant files
+1. Shell commands run from the repository root directory
+2. Use `find llm_do -name "*.py"` to locate relevant files (no `repo/` prefix needed)
 3. Since pipes are blocked, run `find` first, then manually count results or use `wc` on files
 4. Use `grep -r` for searching patterns across multiple files
-5. Use `sandbox_read` to read file contents if detailed analysis is needed
+5. Use `sandbox_read` with `repo/` prefix to read file contents if needed
 6. Present results clearly with context and interpretation
 
 Example workflow (no pipes):
-- `find repo/llm_do -name "*.py"` → get list of files
+- `find llm_do -name "*.py"` → get list of files
 - Count the lines in the output yourself
-- Or use `wc -l` on specific files
+- Or use `wc -l` on specific files like `wc -l llm_do/shell.py`
 
 Guidelines:
 - Be precise: explain what each number means

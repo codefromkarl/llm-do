@@ -81,7 +81,7 @@ $ llm-do worker_bootstrapper --model anthropic:claude-haiku-4-5 \
 
 ## Directory Structure
 
-The bootstrapper expects this layout:
+The bootstrapper expects **exactly this layout** (paths are hardcoded):
 
 ```
 my-project/
@@ -93,6 +93,10 @@ my-project/
     └── generated/   # Auto-created workers saved here
         └── my_analyzer.yaml
 ```
+
+**Important:** The bootstrapper can only access `./input` and `./output` relative to where you run it. It cannot read arbitrary files from the current directory.
+
+> **Future:** CLI config overrides (`--set sandboxes.input.path=./docs`) are planned but not yet implemented. See TODO.md.
 
 ## Configuration
 

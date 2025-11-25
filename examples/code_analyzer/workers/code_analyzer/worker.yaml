@@ -3,7 +3,7 @@ description: Analyze codebases using safe shell commands (wc, find, grep, etc.)
 sandboxes:
   repo:
     path: ../../..
-    mode: r
+    mode: ro
 tool_rules:
   shell:
     name: shell

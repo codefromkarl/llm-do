@@ -1,5 +1,9 @@
 # TODO
 
+## CLI enhancements
+
+- [ ] Add `--set key=value` or `--override JSON` to override any worker config from command line (sandbox paths, model, allow_workers, tool_rules, etc.)
+
 ## Runtime polish
 
 - [ ] Expose per-sandbox aliases when generating `sandbox_*` tool calls so orchestration instructions can mention `sandbox_write_text("evaluations", …)` without boilerplate.
