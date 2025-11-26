@@ -228,11 +228,11 @@ class WorkerContext:
     """
     registry: Any  # WorkerRegistry - avoid circular import
     worker: WorkerDefinition
-    attachment_validator: AttachmentValidator
+    attachment_validator: Optional[AttachmentValidator]
     creation_defaults: WorkerCreationDefaults
     effective_model: Optional[ModelLike]
     approval_controller: Any  # ApprovalController - defined in runtime.py
-    sandbox: AbstractToolset
+    sandbox: Optional[AbstractToolset] = None  # None if worker doesn't use file I/O
     attachments: List[AttachmentPayload] = field(default_factory=list)
     message_callback: Optional[MessageCallback] = None
     custom_tools_path: Optional[Path] = None  # Path to tools.py if worker has custom tools
@@ -242,6 +242,8 @@ class WorkerContext:
         self, attachment_specs: Optional[Sequence[AttachmentInput]]
     ) -> tuple[List[Path], List[Dict[str, Any]]]:
         """Resolve attachment specs to sandboxed files and enforce policy limits."""
+        if self.attachment_validator is None:
+            raise RuntimeError("Worker has no sandbox configured - cannot validate attachments for delegation")
         return self.attachment_validator.validate_attachments(
             attachment_specs, self.worker.attachment_policy
         )

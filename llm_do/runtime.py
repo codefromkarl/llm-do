@@ -60,7 +60,7 @@ class _WorkerExecutionPrep:
     definition: WorkerDefinition
     output_model: Optional[Type[BaseModel]]
     register_tools_fn: Callable
-    sandbox: Sandbox
+    sandbox: Optional[Sandbox]
 
 
 def _prepare_worker_context(
@@ -85,22 +85,23 @@ def _prepare_worker_context(
 
     defaults = creation_defaults or WorkerCreationDefaults()
 
-    # Create new unified sandbox (always required now)
-    new_sandbox: Sandbox
+    # Create sandbox only if configured
+    new_sandbox: Optional[Sandbox] = None
+    attachment_validator: Optional[AttachmentValidator] = None
+
     if definition.sandbox is not None:
-        # New unified sandbox config
+        # Worker has explicit sandbox config
         new_sandbox = Sandbox(definition.sandbox, base_path=registry.root)
-        logger.debug(f"Using new unified sandbox for worker '{worker}'")
+        attachment_validator = AttachmentValidator(new_sandbox)
+        logger.debug(f"Using unified sandbox for worker '{worker}'")
     elif defaults.default_sandbox is not None:
+        # Use default sandbox from creation defaults
         new_sandbox = Sandbox(defaults.default_sandbox, base_path=registry.root)
+        attachment_validator = AttachmentValidator(new_sandbox)
         logger.debug(f"Using default sandbox for worker '{worker}'")
     else:
-        # Create empty sandbox with no paths
-        new_sandbox = Sandbox(SandboxConfig(), base_path=registry.root)
-        logger.debug(f"Using empty sandbox for worker '{worker}'")
-
-    # Create attachment validator using the new sandbox
-    attachment_validator = AttachmentValidator(new_sandbox)
+        # No sandbox - worker doesn't use file I/O
+        logger.debug(f"Worker '{worker}' has no sandbox - file tools disabled")
 
     attachment_payloads: List[AttachmentPayload] = []
     if attachments:

@@ -430,7 +430,12 @@ def test_call_worker_propagates_message_callback(registry):
 
 
 def test_default_agent_runner_uses_pydantic_ai(registry):
-    definition = WorkerDefinition(name="pydantic-worker", instructions="Summarize input")
+    from llm_do.worker_sandbox import SandboxConfig
+    definition = WorkerDefinition(
+        name="pydantic-worker",
+        instructions="Summarize input",
+        sandbox=SandboxConfig()  # Need sandbox for file tools
+    )
     registry.save_definition(definition)
 
     model = RecordingModel()

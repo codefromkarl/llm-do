@@ -177,12 +177,18 @@ def prepare_agent_execution(
     # PydanticAI expects the system prompt under the "instructions" parameter,
     # so even though WorkerDefinition refers to it as the worker's system
     # prompt, we keep passing it under that legacy keyword here.
+
+    # Conditionally include sandbox toolset if configured
+    toolsets = []
+    if context.sandbox is not None:
+        toolsets.append(context.sandbox)  # Sandbox provides read_file, write_file, list_files
+
     agent_kwargs: Dict[str, Any] = dict(
         model=context.effective_model,
         instructions=definition.instructions,
         name=definition.name,
         deps_type=WorkerContext,
-        toolsets=[context.sandbox],  # Sandbox provides read_file, write_file, list_files
+        toolsets=toolsets,
     )
     if output_model is not None:
         agent_kwargs["output_type"] = output_model
