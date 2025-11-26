@@ -16,7 +16,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 
 - Run `.venv/bin/pytest` before committing (tests use dummy models, no live API calls)
 - For executing python scripts use `.venv/bin/python` - the global environment does not have all dependencies
-- Prefer creating/editing workers via `workers/*.yaml` and run them with `llm-do`
+- Prefer creating/editing workers via `workers/*.worker` and run them with `llm-do`
 - Style: black, 4 spaces, snake_case/PascalCase
 - Do not preserve backwards compatibility; with no external consumers, always prioritize cleaner design over keeping old behavior alive
 - Favor clear architecture over hacks; delete dead code when possible

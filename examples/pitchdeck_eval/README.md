@@ -7,11 +7,9 @@ This example demonstrates a clean multi-worker workflow for analyzing pitch deck
 - **Evaluator** focuses purely on analysis (receives PDF, returns markdown)
 
 **Files:**
-- `workers/pitch_orchestrator.yaml` — Orchestrator worker definition
-- `workers/pitch_evaluator.yaml` — Evaluator worker definition
-- `prompts/pitch_orchestrator.txt` — Orchestrator instructions (I/O logic)
-- `prompts/pitch_evaluator.jinja2` — Evaluator instructions with rubric via `{{ file('PROCEDURE.md') }}`
-- `prompts/PROCEDURE.md` — Evaluation rubric (loaded by Jinja2)
+- `workers/pitch_orchestrator.worker` — Orchestrator worker (config + instructions)
+- `workers/pitch_evaluator.worker` — Evaluator worker (config + instructions with Jinja2 template)
+- `workers/PROCEDURE.md` — Evaluation rubric (loaded by Jinja2 `{{ file() }}`)
 - `input/` — Drop PDF pitch decks here for evaluation
 - `evaluations/` — Generated markdown reports written here
 
@@ -42,7 +40,7 @@ llm-do pitch_orchestrator \
   --approve-all
 ```
 
-The worker is discovered from `workers/pitch_orchestrator.yaml` by convention.
+The worker is discovered from `workers/pitch_orchestrator.worker` by convention.
 
 Output will show rich formatted message traces including tool calls, file reads, and
 worker delegations.
@@ -75,11 +73,11 @@ Open `evaluations/` afterwards to inspect the generated reports.
 
 - **Add pitch decks**: Drop PDF files into `input/`. The LLM reads PDFs natively—
   no conversion needed.
-- **Change rubric**: Edit `prompts/PROCEDURE.md` to change evaluation criteria.
+- **Change rubric**: Edit `workers/PROCEDURE.md` to change evaluation criteria.
   The rubric is loaded into the evaluator's instructions via Jinja2.
-- **Adjust output format**: Edit `prompts/pitch_evaluator.jinja2` to change the
+- **Adjust output format**: Edit the body of `workers/pitch_evaluator.worker` to change the
   markdown structure.
-- **Tweak orchestrator logic**: Edit `prompts/pitch_orchestrator.txt` to change
+- **Tweak orchestrator logic**: Edit the body of `workers/pitch_orchestrator.worker` to change
   file handling, naming, or processing order.
 - **Model selection**: Both workers inherit the model from CLI (`--model` flag).
 
@@ -95,7 +93,7 @@ Open `evaluations/` afterwards to inspect the generated reports.
 **`pitch_evaluator`** demonstrates:
 - **Attachment policy** (accepts 1 PDF, max 10MB)
 - **No sandboxes** (receives data via attachments, not file system)
-- Jinja2 template with `{{ file('config/PROCEDURE.md') }}` to load rubric
+- Jinja2 template with `{{ file('PROCEDURE.md') }}` to load rubric
 - **Markdown output** (not JSON - simpler, more readable)
 - Native PDF reading via LLM vision capabilities
 

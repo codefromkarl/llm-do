@@ -102,7 +102,7 @@ class SandboxConfig(FileSandboxConfig):
 ### Worker Definition Example
 
 ```yaml
-# workers/example.yaml
+# workers/example.worker
 sandbox:
   paths:
     portfolio:

@@ -73,7 +73,7 @@ result = call_worker(
 ## Worker Definition Structure
 
 ```yaml
-# workers/orchestrator.yaml
+# workers/orchestrator.worker
 name: orchestrator
 description: Orchestrates multi-step pitch deck evaluation
 instructions: |

@@ -6,7 +6,7 @@ configured to require approval each time.
 
 ## Files
 
-- `workers/save_note.yaml` – worker definition that treats the entire user
+- `workers/save_note.worker` – worker definition that treats the entire user
   input as the note text and overwrites `notes/activity.log` (append support
   coming later).
 - `notes/` – sandbox directory where the log is stored. It starts empty.

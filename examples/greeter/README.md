@@ -29,7 +29,7 @@ The CLI automatically:
 
 ## Worker Definition
 
-See `workers/greeter.yaml`:
+See `workers/greeter.worker`:
 
 ```yaml
 name: greeter

@@ -14,7 +14,7 @@ This example demonstrates how to create workers with **custom tools** in llm-do.
 calculator/
 ├── workers/
 │   └── calculator/
-│       ├── worker.yaml    # Worker configuration
+│       ├── worker.worker    # Worker configuration
 │       └── tools.py       # Custom calculation tools
 └── scratch/               # Working directory for the worker
 ```
@@ -44,9 +44,9 @@ llm-do calculator "Find the prime factors of 1001 and calculate factorial of 7" 
 
 ## How Custom Tools Work
 
-1. **Discovery**: llm-do looks for `workers/calculator/tools.py` alongside `worker.yaml`
+1. **Discovery**: llm-do looks for `workers/calculator/tools.py` alongside `worker.worker`
 2. **Registration**: All public functions (not starting with `_`) are registered as tools
-3. **Approval**: Tool rules in `worker.yaml` control whether approval is required
+3. **Approval**: Tool rules in `worker.worker` control whether approval is required
 4. **Documentation**: Function docstrings become tool descriptions for the LLM
 
 ## Key Features

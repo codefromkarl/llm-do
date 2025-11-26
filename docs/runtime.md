@@ -92,7 +92,7 @@ definition = create_worker(
 )
 ```
 
-Workers are saved to `workers/generated/{name}.yaml`.
+Workers are saved to `workers/generated/{name}.worker`.
 
 ---
 

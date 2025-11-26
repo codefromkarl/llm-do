@@ -98,7 +98,7 @@ Each message type has distinct formatting:
 
 | Message Type | Color | Purpose |
 |--------------|-------|---------|
-| System Instructions | Cyan | Worker's system prompt (loaded from prompts/) |
+| System Instructions | Cyan | Worker's system prompt (from .worker file body) |
 | User Input | Green | User's input message or JSON payload |
 | Tool Call | Blue | LLM calling a tool (e.g., `sandbox_read_text()`) |
 | Tool Result | Yellow | Tool output being sent back to LLM |

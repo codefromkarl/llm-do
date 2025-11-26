@@ -20,11 +20,11 @@ llm-do web_research_orchestrator "AI deployment in hospitals" --model $MODEL --a
 Outputs are written to `reports/{topic-slug}.md` and `reports/{topic-slug}.json`.
 
 ## Files
-- `workers/web_research_orchestrator/worker.yaml` — orchestrator definition + search tool
-- `workers/web_research_extractor/worker.yaml` — extractor definition + fetch tool
-- `workers/web_research_consolidator.yaml` — consolidates multi-source signals
-- `workers/web_research_reporter.yaml` — produces Markdown + JSON bundle
-- `prompts/*.jinja2` — worker instructions
+- `workers/web_research_orchestrator/worker.worker` — orchestrator definition + search tool
+- `workers/web_research_extractor/worker.worker` — extractor definition + fetch tool
+- `workers/web_research_consolidator.worker` — consolidates multi-source signals
+- `workers/web_research_reporter.worker` — produces Markdown + JSON bundle
+- `Worker instructions with Jinja2 templates` — worker instructions
 - `schemas/models.py` — reference Pydantic models for the data contracts
 
 ## Notes

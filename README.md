@@ -40,7 +40,8 @@ Model names follow [PydanticAI conventions](https://ai.pydantic.dev/models/) (e.
 Workers can do much more than simple chat: access files, call other workers, require approvals. Here's a real example that analyzes PDF pitch decks:
 
 ```yaml
-# workers/pitch_evaluator.yaml
+# workers/pitch_evaluator.worker
+---
 name: pitch_evaluator
 description: Analyze a PDF pitch deck and return a markdown evaluation report.
 attachment_policy:
@@ -48,10 +49,8 @@ attachment_policy:
   max_total_bytes: 10000000  # 10MB
   allowed_suffixes:
     - .pdf
-```
+---
 
-```jinja2
-# prompts/pitch_evaluator.jinja2
 You are a pitch deck evaluation specialist. You will receive a pitch deck PDF
 as an attachment and must analyze it according to the evaluation rubric below.
 
@@ -97,14 +96,14 @@ Check the `examples/` directory for additional patterns:
 
 ## How It Works
 
-**Workers** are YAML files that define:
+**Workers** are `.worker` files with YAML front matter + instructions:
 - `name`: Worker identifier
 - `description`: What the worker does
 - `model`: Which LLM to use (optional, can override with `--model`)
-- `instructions`: System prompt used when the worker executes (inline or from `prompts/{name}.jinja2`)
 - `sandboxes`: Which directories to access (read/write permissions, file filters)
 - `tool_rules`: Which tools require approval
 - `worker_creation_policy`: Can this worker create new workers?
+- **Body** (after `---`): System prompt / instructions with optional Jinja2 templating
 
 **Sandboxes** limit file access:
 ```yaml

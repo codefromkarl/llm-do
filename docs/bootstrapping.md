@@ -49,7 +49,7 @@ llm-do worker_bootstrapper --model anthropic:claude-sonnet-4 \
 │ workers/        │   │ output/         │
 │  generated/     │   │  result.md      │
 │   pdf_analyzer  │   │                 │
-│    .yaml        │   │                 │
+│    .worker        │   │                 │
 └─────────────────┘   └─────────────────┘
 ```
 
@@ -91,7 +91,7 @@ my-project/
 ├── output/          # Read-write: results written here
 └── workers/
     └── generated/   # Auto-created workers saved here
-        └── my_analyzer.yaml
+        └── my_analyzer.worker
 ```
 
 **Important:** The bootstrapper can only access `./input` and `./output` relative to where you run it. It cannot read arbitrary files from the current directory.
@@ -112,7 +112,7 @@ The bootstrapper has these built-in permissions:
 ## Supported File Types
 
 **Text files** (can be read directly):
-- `.md`, `.txt`, `.yaml`, `.json`, `.py`
+- `.md`, `.txt`, `.worker`, `.json`, `.py`
 
 **Binary files** (passed as attachments):
 - `.pdf` and other binary formats
