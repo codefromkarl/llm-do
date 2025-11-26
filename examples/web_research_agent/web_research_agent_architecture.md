@@ -1,10 +1,10 @@
-# Web Research & Insight Agent — Architecture & Implementation Plan
+# Web Research & Insight Agent - Architecture & Implementation Plan
 
 ## 1. Overview
-This document describes the design of a **real‑world, measurable, multi‑step automated research agent** built using **llm-do + Pydantic‑AI + multi‑worker orchestration**. The agent dynamically retrieves information from the web, extracts structured insights, consolidates analysis across sources, and generates an evidence‑based report.
+This document describes the design of a **real-world, measurable, multi-step automated research agent** built using **llm-do + Pydantic-AI + multi-worker orchestration**. The agent dynamically retrieves information from the web, extracts structured insights, consolidates analysis across sources, and generates an evidence-based report.
 
 Unlike a simple ChatGPT conversation, this agent:
-- Works with **real‑time external data**, not static inputs
+- Works with **real-time external data**, not static inputs
 - Collects and analyzes **multiple independent sources**
 - Produces **verifiable, ranked, structured output** (JSON + Markdown)
 - Demonstrates **tool + LLM + workflow orchestration** capabilities
@@ -58,12 +58,12 @@ User Topic Input (runtime)
 ## 4. Example Output
 ### Markdown
 ```
-# AI Deployment in Hospitals — Research Insights
+# AI Deployment in Hospitals - Research Insights
 
 ## Key Findings
-• Cost reduction: 15–28% improvement
-• Regulatory compliance complexity
-• Workforce augmentation benefits
+- Cost reduction: 15-18% improvement
+- Regulatory compliance complexity
+- Workforce augmentation benefits
 
 ## Evidence Sources
 - https://example.com/article1
@@ -83,7 +83,7 @@ User Topic Input (runtime)
 
 ---
 
-## 5. Deliverables for Upwork Milestones
+## 5. Example Deliverables
 | Milestone | Deliverable |
 |-----------|-------------|
 | **1. Architecture & workflow** | This document + sequence diagram + YAML skeleton |
@@ -92,4 +92,3 @@ User Topic Input (runtime)
 | **4. Final polish** | CLI runner, configuration options, improvements |
 
 ---
-
